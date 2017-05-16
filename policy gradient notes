@@ -1,0 +1,25 @@
+gradient estimator:
+for generic E[f(x)] where x is sampled ~ prob dist p(x|theta), we want to compute the gradient wrt parameter theta:
+grad_wrt_x(E_x(f(x)))
+
+we don't assume we need to know anything about f(x), just samples of x. from those samples, compute gradient.
+==> g_hat = E_x(f(x)*grad_theta*log(p(x|theta))
+
+to compute that^, we need to be able to compute+differentiate density p(x|theta) wrt theta
+if f(x) measures how good sample x is, moving in the direction of g_hat pushed up the logprob of the sample in proportion to how good it is. that section of the parameter space will be pushed towards good samples
+this is valid even if f(x) is discontinuous, and unknown, or sample space (containing x) is a discrete set
+
+intuition: high scoring samples push the probability density function'
+
+now, expand our concept of x to denote a whole trajectory, where a trajectory is an entire sequence of (state,action,reward) pairs. then, we want to compute the gradient wrt theta(expectation of the reward of a trajectory). it turns out that the gradient(log-probability(trajectories)) just depend on the grad(log-probability(actions)).
+==> grad_wrt_theta(E[R]) = E[total_reward * gradient_wrt_theta(sum[t=0:T-1](log-probability of all actions)]
+where log-probability of all actions was written as log P(action_t | state_t, theta)
+
+intuition: using good trajectories (high reward) as supervised examples in classification/regression
+
+the problem with this approach is that it has really high variance. this is because it is confounding the rewards from all the actions. the gradient boosts the probability of every action taken in the trajectory /equally/, reguardless if any single one was a mistake. you make no attempt to discriminate between actions. so low bias, high variance, and you need a ton of samples before you have a good empiricle estimator. 
+
+to reduce variance but keep low bias:
+compute the gradient of a single reward at a specific timestep.
+add a bias, which prevents boosting probability of actions with minimal reward. we want an unbiased estimator that only pushed up density for >average x_i. so f(x) becomes (f(x)-bias) where bias is a constant.
+we increase logprob of action a_t' proportionally to how much reward is better than expected.
