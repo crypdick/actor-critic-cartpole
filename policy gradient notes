@@ -1,3 +1,5 @@
+
+
 gradient estimator:
 for generic E[f(x)] where x is sampled ~ prob dist p(x|theta), we want to compute the gradient wrt parameter theta:
 grad_wrt_x(E_x(f(x)))
