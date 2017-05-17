@@ -27,7 +27,7 @@
 %In this section, provide brief details on the background information of the domain from which the project is proposed. Historical information relevant to the project should be included. It should be clear how or why a problem in the domain can or should be solved. Related academic research should be appropriately cited in this section, including why that research is relevant. Additionally, a discussion of your personal motivation for investigating a particular problem in the domain is encouraged but not required.
 
 
-Reinforcement learners are a class of algorithms which learn to perform a task better given feedback. These algorithms can amazingly become proficient at the task-- potentially outperforming humans-- without ever being given explicit directions, rules, explanations, or any domain knowledge whatsoever. Given enough time to test various strategies, a good reinforcement learning algorithm iteratively biases its decision policy until it converges to the optimal performace.
+Reinforcement learners are a class of algorithms which learn to perform a task given a way to evaluate its own performance. These algorithms can amazingly become proficient at the task-- in some tasks outperforming humans-- without ever being given explicit directions, rules, explanations, or any domain knowledge whatsoever. Given enough time to test various strategies, a good reinforcement learning algorithm iteratively biases its decision policy until it converges to the optimal performace.
 
 
 \section*{Problem Statement}
@@ -42,9 +42,9 @@ In this work, I want to train an agent to play ``CartPole", a simple 2D game whi
 %
 %In this section, the dataset(s) and/or input(s) being considered for the project should be thoroughly described, such as how they relate to the problem and why they should be used. Information such as how the dataset or input is (was) obtained, and the characteristics of the dataset or input, should be included with relevant references and citations as necessary It should be clear how the dataset(s) or input(s) will be used in the project and whether their use is appropriate given the context of the problem.
 %
-For this task, my learner will be totally naive and will have no previous data to inform the policy. At each timestep, the game provides the agent the current environment state as well as the reward for the action taken at the previous timestep.  The sensory input is the cart's position $x$, the cart's velocity $\dot x$, the pole's angle $\theta$, and its rate of change $\dot\theta$.\cite{state_def} I propose to reduce the dimensionality of the inputs by half by considering solely $x$ and $\theta$, since I predict these are the most salient features (discussed in the ``evaluation metrics" section).
+For this task, my learner will be totally naive and will have no previous data to inform the policy. At each timestep, the game provides the agent the current environment state as well as the reward for the action taken at the previous timestep.  The sensory input is the cart's position $x$, the cart's velocity $\dot x$, the pole's angle $\theta$ (measured in radians), and its rate of change $\dot\theta$.\cite{state_def} I propose to reduce the dimensionality of the inputs by half by considering solely $x$ and $\theta$, since I predict these are the most salient features (discussed in the ``evaluation metrics" section).
 
-Given the state and the chosen action, the agent is given immediate feedback from the game in the form of a reward. These (state, action, reward) pairs are crucial for the reinforcement algorithm to improve its policy from its experiences.
+Given the state and the chosen action, the agent is given immediate feedback from the game in the form of a reward. These (state, action, reward) pairs are crucial for the reinforcement algorithm to improve its policy from its experiences (discussed in the project design section).
 
 \section*{Solution Statement}
 %_(approx. 1 paragraph)_
@@ -58,18 +58,14 @@ For the purposes of this project, I will consider the game``solved" when the pol
 %
 %In this section, provide the details for a benchmark model or result that relates to the domain, problem statement, and intended solution. Ideally, the benchmark model or result contextualizes existing methods or known information in the domain and problem given, which could then be objectively compared to the solution. Describe how the benchmark model or result is measurable (can be measured by some metric and clearly observed) with thorough detail.
 %
-To benchmark our models performance, I will create models to function as baselines. The first is a random agent, which takes a random sample of the allowable actions at each timestep. The second is a very simple agent which always pushes the pole away from the way it is tilting. In other words, if $\theta$ is negative, the agent should push the cart to the left so that the pole tilts to the right (and vice versa).
+To benchmark our models performance, I will create models to function as baselines. The first is a random agent, which takes a random sample of the allowable actions at each timestep. The second policy is to push the cart in the same direction that the pole is tilting. In other words, if the pole is leaning to the right, the agent will always push to the cart to the right, restoring balance by positioning the cart directly beneath the pole (and vice versa).
 %
 \section*{Evaluation Metrics}
 %_(approx. 1-2 paragraphs)_
 %
 %In this section, propose at least one evaluation metric that can be used to quantify the performance of both the benchmark model and the solution model. The evaluation metric(s) you propose should be appropriate given the context of the data, the problem statement, and the intended solution. Describe how the evaluation metric(s) are derived and provide an example of their mathematical representations (if applicable). Complex evaluation metrics should be clearly defined and quantifiable (can be expressed in mathematical or logical terms).
 
-We can expect an optimal agent to keep the pole balanced upright (i.e. close to 0$\degree$). This can be evaluated by charting the average observed angle $\theta$. In addition, we want the agent to bias the cart to move away from the edges to minimize the risk that it prematurely ends a trial for moving out-of-bounds. We can evaluate this by charting the average cart position. Finally, the optimal agent will be able to maintain the pole upright for long periods. We can quantify this using the average length of the trial.
-
-Ultimately, the most salient attribute of an optimized agent is that it spends the maximum amount of time upright. If we structure the reward function to simply reward us for each timestep the simulation is active, we should expect the learning algorithm to keep theta near 0 and the x position near 0. Thus, I think we can The number of timesteps per trial should be close to the maximum, which is 200 timesteps.
-
-I will consider the game ``solved" when it spends 90\% of the maximum time upright for 20 consecutive trials.
+We can expect an optimal agent to keep the pole balanced upright (i.e. close to 0$\degree$). This can be evaluated by charting the average observed angle $\theta$. In addition, we want the agent to bias the cart to move away from the edges to minimize the risk that it prematurely ends a trial for moving out-of-bounds. We can check whether our policy is biased towards the center by plotting a histogram of the cart positions. The optimal agent will be able to maintain the pole upright for long periods. We can quantify this by plotting the average length of the trials in each episode. Finally, we can plot the average reward per trial for each episode to get a sense of how the agent judges its own performance.
 
 
 \section*{Project Design}
@@ -78,12 +74,17 @@ I will consider the game ``solved" when it spends 90\% of the maximum time uprig
 %In this final section, summarize a theoretical workflow for approaching a solution given the problem. Provide thorough discussion for what strategies you may consider employing, what analysis of the data might be required before being used, or which algorithms will be considered for your implementation. The workflow and discussion that you provide should align with the qualities of the previous sections. Additionally, you are encouraged to include small visualizations, pseudocode, or diagrams to aid in describing the project design, but it is not required. The discussion should clearly outline your intended workflow of the capstone project.
 First, I will implement the simple baseline models mentioned in the benchmarking section. These are very simple and easy to implement. I will also create plots which visualize the statistics mentioned in the evaluation metrics section above. The combination of these two will provide a reference for the rest of the project.
 
-Given the relatively low-dimensional state space, Q-learning is a possible learning algorithm to use. However, I would like to implement an algorithm which is more broadly applicable to tasks with a very large state space. Generally, these require on-policy learners, since an off-policy learner would be too computationally intensive.
+Given the relatively low-dimensional state space, Q-learning is a possible learning algorithm to use. However, I would like to implement an algorithm which is more broadly applicable to tasks with a very large state space. Generally, these require on-policy learners, since an off-policy learner would explore the state space more and would be too computationally intensive.
 
 The algorithm I have chosen is policy gradients. Policy gradients do not require any prior understanding of the reward function.\cite{pg_lecture} The learning algorithm is online, meaning that the policy is being updated at every timestep. This also reduces variance while keeping the bias low.\cite{pg_lecture}
 
+According to reference \cite{pg_lecture}, it is best to optimize over individual timesteps rather than over whole trajectories. The problem with the whole-trajectory method is that it has very high variance, as the algorithm confounds the rewards from all the actions. The gradient boosts the probability of all the actions taken in the trajectory \textit{equally}, reguardless if any single one was a mistake. This is a low bias, high variance approach, which means we need many samples before the empiracle estimator becomes good. Computing the gradient for each reward reduces the variance while maintaing low bias.
 
-I propose to use Tensorflow. This will help me visualize computational graph of the model.
+In addition, we want an estimator that only increases the probability of actions which has above-average rewards. To achieve this, we add a bias term, which increases the log-probability of action $a_{t_i}$ proportionally to how much reward is better than expected.
+
+
+
+I propose to implement my algorithm using Tensorflow. This will help me visualize computational graph of the model.
 
 %-----------
 %
