@@ -84,6 +84,11 @@ with tf.name_scope('dropout'):
     dropped = tf.nn.dropout(hidden1, keep_prob)
 """
 
+
+'''
+TODO: make several classes which inherit from a masterclass. each class is a separate policy: the random agent,
+the agent which always pushed towards the center, and the policy gradient
+'''
 class Episode():
     def __init__(self, env, policy_grad, value_grad, sess, trials_per_episode=400, render=False):
         self.env = env
@@ -100,6 +105,8 @@ class Episode():
         self.updated_rewards = []
         self.action_space = list(range(2))
         self.current_state = None
+        self.metadata = None
+        # TODO: if plotting, return metadata: histograms of each episode
 
     def run_episode(self):
         full_state = self.env.reset()
@@ -249,6 +256,11 @@ if __name__ == '__main__':
             episode_total_reward = episode.run_episode()
             reward_timeline.append(episode_total_reward)
 
+        # TODO save progress to resume learning weights
+
+        '''
+        TODO: make series of graphs I talked about in the capstone proposal
+        '''
         plt.plot(np.arange(len(reward_timeline)), reward_timeline)
         plt.show()
 
