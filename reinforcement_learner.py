@@ -4,6 +4,25 @@ import gym
 from operator import itemgetter
 import matplotlib.pyplot as plt
 
+
+ENV_NAME = 'CartPole-v0'
+RENDER = True
+SAVE_METADATA = True
+GYM_MONITOR = True
+MONITOR_DIR = './log/gym_monitor'
+TENSORBOARD_RESULTS_DIR = './log/tf_results'
+
+# training params
+N_EPISODES = 9000
+EPISIDE_TIME_LIMIT = None  # set this after env init
+
+
+# print(env.action_space)  # Discrete(2), i.e. 0 or 1
+# print(env.observation_space) #  Box(4,)
+# print(env.observation_space.high)  # [  4.80000000e+00   3.40282347e+38   4.18879020e-01   3.40282347e+38]
+# print(env.observation_space.low)  # same as above with flipped signs
+
+
 # https://www.youtube.com/watch?v=oPGVsoBonLM
 # policy gradient goal: maximize E[Reward|policy*]
 
@@ -96,6 +115,7 @@ the agent which always pushed towards the center, and the policy gradient
 class Episode():
     def __init__(self, env, policy_grad, value_grad, sess, trials_per_episode=400, render=False):
         self.env = env
+        timesteps_per_trial = self.env.spec.tags.get('wrapper_config.TimeLimit.max_episode_steps')
         if render is True:
             self.env.render()  # show animation window
         # import pdb; pdb.set_trace()
@@ -115,10 +135,9 @@ class Episode():
     def run_episode(self):
         full_state = self.env.reset()
         self.current_state = list(itemgetter(0,2)(full_state))
-        timesteps_per_trial = self.env.spec.tags.get('wrapper_config.TimeLimit.max_episode_steps')
-        print("ts per trial", timesteps_per_trial)
+        #print("ts per trial", timesteps_per_trial)
         thetas = []
-        for ts in range(timesteps_per_trial):
+        for ts in range(EPISIDE_TIME_LIMIT):
 
             # calculate policy
             obs_vector = np.expand_dims(self.current_state, axis=0)  # shape (4,) --> (1,4)
@@ -155,7 +174,7 @@ class Episode():
         for ts, transition in enumerate(self.transitions):
             obs, action, reward = transition
 
-            # calculate discounted monte-carlo return
+            # calculate discounted return
             future_reward = 0
             n_future_timesteps = len(self.transitions) - ts
             decrease = 1
@@ -222,32 +241,16 @@ class Episode():
 
 
 if __name__ == '__main__':
-    flags = tf.app.flags
-    FLAGS = flags.FLAGS
-    # flags.DEFINE_boolean('upload',False,'upload to gym (requires evironment variable OPENAI_GYM_API_KEY)')
-    flags.DEFINE_string('env', 'CartPole-v0', 'gym environment')
-    # flags.DEFINE_integer('train',10000,'training time between tests. use 0 for test run only')
-    # flags.DEFINE_integer('test',10000,'testing time between training')
-
-    # flags.DEFINE_bool('random',False,'use random agent')
-    # flags.DEFINE_bool('tot',False,'train on test data')
-    # flags.DEFINE_integer('total',1000000,'total training time')
-    # flags.DEFINE_float('monitor',.05,'probability of monitoring a test episode')
-    # flags.DEFINE_bool('autonorm',False,'automatically normalize observations and actions of the environemnt')
-
-    env = gym.make(FLAGS.env)
-    env = gym.wrappers.Monitor(env, 'log/cartpole-trial1', force=True)  # save trial vids
-    flags.DEFINE_integer('tmax', env.spec.tags.get('wrapper_config.TimeLimit.max_episode_steps'),
-                         'maximum timesteps per episode')
-    #print(env.action_space)  # Discrete(2), i.e. 0 or 1
-    # print(env.observation_space) #  Box(4,)
-    #print(env.observation_space.high)  # [  4.80000000e+00   3.40282347e+38   4.18879020e-01   3.40282347e+38]
-    #print(env.observation_space.low)  # same as above with flipped signs
 
     policy_grad = actor_network()
     #print("policy_grad", policy_grad)
     #raise
     reward_grad = critic_network()
+
+    env = gym.make(ENV_NAME)
+    env = gym.wrappers.Monitor(env, 'log/cartpole-trial1', force=True)  # save trial vids
+    #flags.DEFINE_integer('tmax', env.spec.tags.get('wrapper_config.TimeLimit.max_episode_steps'),
+    #                     'maximum timesteps per episode')
 
     init = tf.global_variables_initializer()
     with tf.Session() as sess:
@@ -255,8 +258,7 @@ if __name__ == '__main__':
 
         reward_timeline = []
         episode = Episode(env, policy_grad, reward_grad, sess, render=False)
-        n_episodes = 9000
-        for i_episode in range(n_episodes):
+        for i_episode in range(N_EPISODES):
             episode_total_reward = episode.run_episode()
             reward_timeline.append(episode_total_reward)
 
