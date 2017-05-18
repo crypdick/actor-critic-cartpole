@@ -19,21 +19,22 @@ we don't need to know anything about f(x), just sample from the distribution.
 
 
 
-def variable_summaries(var):
-    """Attach a lot of summaries to a Tensor (for TensorBoard visualization).
-    function stolen from TF MNIST example: https://github.com/tensorflow/tensorflow/blob/r1.1/tensorflow/examples/tutorials/mnist/mnist_with_summaries.py#L66-L76"""
-    with tf.name_scope('summaries'):
-        mean = tf.reduce_mean(var)
-        tf.summary.scalar('mean', mean)
-        with tf.name_scope('stddev'):
-            stddev = tf.sqrt(tf.reduce_mean(tf.square(var - mean)))
-        tf.summary.scalar('stddev', stddev)
-        tf.summary.scalar('max', tf.reduce_max(var))
-        tf.summary.scalar('min', tf.reduce_min(var))
-        tf.summary.histogram('histogram', var)
+# def variable_summaries(var):
+#     """Attach a lot of summaries to a Tensor (for TensorBoard visualization).
+#     function stolen from TF MNIST example: https://github.com/tensorflow/tensorflow/blob/r1.1/tensorflow/examples/tutorials/mnist/mnist_with_summaries.py#L66-L76"""
+#     #with tf.name_scope('summaries'):
+#         mean = tf.reduce_mean(var)
+#         tf.summary.scalar('mean', mean)
+#         with tf.name_scope('stddev'):
+#             stddev = tf.sqrt(tf.reduce_mean(tf.square(var - mean)))
+#         tf.summary.scalar('stddev', stddev)
+#         tf.summary.scalar('max', tf.reduce_max(var))
+#         tf.summary.scalar('min', tf.reduce_min(var))
+#         tf.summary.histogram('histogram', var)
 
 
-def policy_gradient():
+def actor_network():
+    '''AKA policy gradient'''
     with tf.variable_scope("policy"):
         weights = tf.get_variable("weights", [4, 2])
         state = tf.placeholder("float", [None, 4], name='state')
@@ -48,33 +49,36 @@ def policy_gradient():
         return probabilities, state, actions, advantages, optimizer
 
 
-def reward_gradient():
-    with tf.variable_scope("reward"):
-        with tf.name_scope('x'):
-            state = tf.placeholder("float", [None, 4], name='state')
+def critic_network():
+    '''AKA reward gradient. produces a TD (Temporal-Difference) error signal given the state and resultant reward
 
-        new_rewards = tf.placeholder("float", [None, 1], name='new_rewards')
-        with tf.name_scope('hidden_1'):
-            with tf.name_scope('weights'):
-                weights1 = tf.get_variable("w1", [4, 10])
-                variable_summaries(weights1)
-            with tf.name_scope('biases'):
-                biases1 = tf.get_variable("b1", [10])
-                variable_summaries(biases1)
-            with tf.name_scope('Wx_plus_b'):
-                hidden_1 = tf.nn.relu(tf.matmul(state, weights1) + biases1, name='hidden_1')
-                tf.summary.histogram('pre_activations', hidden_1)
-        with tf.name_scope('output_layer'):
-            with tf.name_scope('weights'):
-                w2 = tf.get_variable("w2", [10, 1])
-            with tf.name_scope('biases'):
-                b2 = tf.get_variable("b2", [1])
-            with tf.name_scope('Wx_plus_b'):
-                output_activations = tf.matmul(hidden_1, w2) + b2  # TODO: pass through activation func?  rename to preactivated
-        residuals = output_activations - new_rewards  # TODO: new rewards? or predicted? wat
-        loss = tf.nn.l2_loss(residuals, name='loss')
-        optimizer = tf.train.AdamOptimizer(0.1).minimize(loss)
-        return output_activations, state, new_rewards, optimizer, loss
+    '''
+    # with tf.variable_scope("reward"):
+    #     with tf.name_scope('x'):
+    state = tf.placeholder("float", [None, 4], name='state')
+
+    new_rewards = tf.placeholder("float", [None, 1], name='new_rewards')
+        # with tf.name_scope('hidden_1'):
+        #     with tf.name_scope('weights'):
+    weights1 = tf.get_variable("w1", [4, 10])
+    # variable_summaries(weights1)
+            # with tf.name_scope('biases'):
+    biases1 = tf.get_variable("b1", [10])
+    # variable_summaries(biases1)
+            # with tf.name_scope('Wx_plus_b'):
+    hidden_1 = tf.nn.relu(tf.matmul(state, weights1) + biases1, name='hidden_1')
+    tf.summary.histogram('pre_activations', hidden_1)
+        # with tf.name_scope('output_layer'):
+        #     with tf.name_scope('weights'):
+    w2 = tf.get_variable("w2", [10, 1])
+            # with tf.name_scope('biases'):
+    b2 = tf.get_variable("b2", [1])
+            # with tf.name_scope('Wx_plus_b'):
+    output_activations = tf.matmul(hidden_1, w2) + b2  # TODO: pass through activation func?  rename to preactivated
+    residuals = output_activations - new_rewards  # TODO: new rewards? or predicted? wat
+    loss = tf.nn.l2_loss(residuals, name='loss')
+    optimizer = tf.train.AdamOptimizer(0.1).minimize(loss)
+    return output_activations, state, new_rewards, optimizer, loss
 """
 # dropout example from https://github.com/tensorflow/tensorflow/blob/r1.1/tensorflow/examples/tutorials/mnist/mnist_with_summaries.py
 
@@ -240,10 +244,10 @@ if __name__ == '__main__':
     #print(env.observation_space.high)  # [  4.80000000e+00   3.40282347e+38   4.18879020e-01   3.40282347e+38]
     #print(env.observation_space.low)  # same as above with flipped signs
 
-    policy_grad = policy_gradient()
+    policy_grad = actor_network()
     #print("policy_grad", policy_grad)
     #raise
-    reward_grad = reward_gradient()
+    reward_grad = critic_network()
 
     init = tf.global_variables_initializer()
     with tf.Session() as sess:
