@@ -8,19 +8,12 @@ import matplotlib.pyplot as plt
 ENV_NAME = 'CartPole-v0'
 RENDER = True
 SAVE_METADATA = True
-GYM_MONITOR = True
-MONITOR_DIR = './log/gym_monitor'
+SAVE_VIDS = True
+VID_DIR = './log/videos/'
 TENSORBOARD_RESULTS_DIR = './log/tf_results'
 
 # training params
 N_EPISODES = 9000
-EPISIDE_TIME_LIMIT = None  # set this after env init
-
-
-# print(env.action_space)  # Discrete(2), i.e. 0 or 1
-# print(env.observation_space) #  Box(4,)
-# print(env.observation_space.high)  # [  4.80000000e+00   3.40282347e+38   4.18879020e-01   3.40282347e+38]
-# print(env.observation_space.low)  # same as above with flipped signs
 
 
 # https://www.youtube.com/watch?v=oPGVsoBonLM
@@ -113,10 +106,10 @@ TODO: make several classes which inherit from a masterclass. each class is a sep
 the agent which always pushed towards the center, and the policy gradient
 '''
 class Episode():
-    def __init__(self, env, policy_grad, value_grad, sess, trials_per_episode=400, render=False):
+    def __init__(self, env, policy_grad, value_grad, sess, trials_per_episode=400):
         self.env = env
         timesteps_per_trial = self.env.spec.tags.get('wrapper_config.TimeLimit.max_episode_steps')
-        if render is True:
+        if RENDER is True:
             self.env.render()  # show animation window
         # import pdb; pdb.set_trace()
         self.pl_calculated, self.pl_state, self.pl_actions, self.pl_advantages, self.pl_optimizer = policy_grad
@@ -135,9 +128,10 @@ class Episode():
     def run_episode(self):
         full_state = self.env.reset()
         self.current_state = list(itemgetter(0,2)(full_state))
+        max_episode_steps = self.env.spec.tags.get('wrapper_config.TimeLimit.max_episode_steps')
         #print("ts per trial", timesteps_per_trial)
         thetas = []
-        for ts in range(EPISIDE_TIME_LIMIT):
+        for ts in range(max_episode_steps):
 
             # calculate policy
             obs_vector = np.expand_dims(self.current_state, axis=0)  # shape (4,) --> (1,4)
@@ -241,26 +235,38 @@ class Episode():
 
 
 if __name__ == '__main__':
-
-    policy_grad = actor_network()
-    #print("policy_grad", policy_grad)
-    #raise
-    reward_grad = critic_network()
-
-    env = gym.make(ENV_NAME)
-    env = gym.wrappers.Monitor(env, 'log/cartpole-trial1', force=True)  # save trial vids
-    #flags.DEFINE_integer('tmax', env.spec.tags.get('wrapper_config.TimeLimit.max_episode_steps'),
-    #                     'maximum timesteps per episode')
-
+    '''scopes
+    global scope should be constants, put at top
+    main loop scope should have the tf session, state+action dimensionality, bounds, actor+critic networks,
+    and the episode loop.
+    '''
     init = tf.global_variables_initializer()
     with tf.Session() as sess:
+        env = gym.make(ENV_NAME)
         sess.run(init)
+        # print(env.observation_space)  # Box(4,)
+        state_dim = env.observation_space.shape[0]
+        # print(env.action_space)  # Discrete(2), i.e. 0 or 1
+        action_dim = env.action_space.shape[0]
+        # print(env.observation_space.high)  # [  4.80000000e+00   3.40282347e+38   4.18879020e-01   3.40282347e+38]
+        # print(env.observation_space.low)  # same as above with flipped signs
+        action_bound = env.action_space.high
+
+        actor = actor_network()
+        critic = critic_network()
 
         reward_timeline = []
-        episode = Episode(env, policy_grad, reward_grad, sess, render=False)
+        episode = Episode(env, actor, critic, sess)
+
+        if SAVE_VIDS:
+            env = gym.wrappers.Monitor(env, VID_DIR, force=True)
+
         for i_episode in range(N_EPISODES):
             episode_total_reward = episode.run_episode()
             reward_timeline.append(episode_total_reward)
+
+        if SAVE_VIDS:
+            env.monitor.close()
 
         # TODO save progress to resume learning weights
 
