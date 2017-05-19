@@ -6,6 +6,7 @@ import matplotlib.pyplot as plt
 
 
 ENV_NAME = 'CartPole-v0'
+TRAINING_POLICY = 'RANDOM'
 RENDER = True
 SAVE_METADATA = True
 SAVE_VIDS = True
@@ -43,6 +44,21 @@ we don't need to know anything about f(x), just sample from the distribution.
 #         tf.summary.scalar('max', tf.reduce_max(var))
 #         tf.summary.scalar('min', tf.reduce_min(var))
 #         tf.summary.histogram('histogram', var)
+
+class RandomActor(object):
+    def __init__(self):
+        pass
+
+    def predict(self, _inputs):
+        choice = np.random.choice(2)
+        if choice:  # go right
+            return np.array([[0., 1.]])
+        else:
+            return np.array([[1., 0.]])
+
+class RandomCritic(object):
+    def __init__(self):
+        pass
 
 class Actor(object):
     '''AKA policy gradient'''
@@ -112,14 +128,17 @@ TODO: make several classes which inherit from a masterclass. each class is a sep
 the agent which always pushed towards the center, and the policy gradient
 '''
 class Episode():
-    def __init__(self, env, policy_grad, value_grad, sess, trials_per_episode=400):
+    def __init__(self, env, actor, critic, sess, trials_per_episode=400, replay_buffer=False):
+        self.sess = sess
         self.env = env
-        timesteps_per_trial = self.env.spec.tags.get('wrapper_config.TimeLimit.max_episode_steps')
         if RENDER is True:
             self.env.render()  # show animation window
+
+        self.actor = actor
+        self.critic = critic
         # import pdb; pdb.set_trace()
-        self.pl_calculated, self.pl_state, self.pl_actions, self.pl_advantages, self.pl_optimizer = policy_grad
-        self.vl_calculated, self.vl_state, self.vl_newvals, self.vl_optimizer, self.vl_loss = value_grad
+        #self.pl_calculated, self.pl_state, self.pl_actions, self.pl_advantages, self.pl_optimizer = actor
+        #self.vl_calculated, self.vl_state, self.vl_newvals, self.vl_optimizer, self.vl_loss = critic
         self.total_episode_reward = 0
         self.states = []
         self.actions = []
@@ -141,9 +160,10 @@ class Episode():
 
             # calculate policy
             obs_vector = np.expand_dims(self.current_state, axis=0)  # shape (4,) --> (1,4)
-            probs = sess.run(self.pl_calculated, feed_dict={self.pl_state: obs_vector})  # probability of both actions
+            action_probabilities = self.actor.predict(self.current_state)
+            #probs = sess.run(self.pl_calculated, feed_dict={self.pl_state: obs_vector})  # probability of both actions
             # draw action 0 with probability P(0), action 1 with P(1)
-            action = self._select_action(probs[0])
+            action = self._select_action(action_probabilities[0])
 
             # take the action in the environment
             old_observation = self.current_state
@@ -256,8 +276,12 @@ if __name__ == '__main__':
         # print(env.observation_space.high)  # [  4.80000000e+00   3.40282347e+38   4.18879020e-01   3.40282347e+38]
         # print(env.observation_space.low)  # same as above with flipped signs
 
-        actor = Actor()
-        critic = Critic()
+        if TRAINING_POLICY == 'RANDOM':
+            actor = RandomActor()
+            critic = RandomCritic()
+        elif TRAINING_POLICY == 'POLICY_GRADIENT':
+            actor = Actor()
+            critic = Critic()
 
         reward_timeline = []
         episode = Episode(env, actor, critic, sess)
