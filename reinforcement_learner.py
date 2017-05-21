@@ -12,7 +12,6 @@ os.environ["CUDA_VISIBLE_DEVICES"] = "1"  # use correct GPU
 
 
 ENV_NAME = 'CartPole-v0'
-TRAINING_POLICY = 'RANDOM'
 RENDER_ENV = True
 SAVE_METADATA = True
 SAVE_VIDS = True
@@ -75,6 +74,21 @@ class RandomActor(Actor):
             probabilities = np.array([1., 0.])
 
         return probabilities
+
+class ContrarianActor(Actor):
+    def __init__(self, sess):
+        super().__init__(sess)
+
+    def predict_action(self, state):
+        state = state[0]  # list in a list
+        theta = state[1]
+        if theta >= 0.:
+            probabilities = np.array([0., 1.])
+        else:
+            probabilities = np.array([1., 0.])
+
+        return probabilities
+
 #
 # class Actor(object):
 #     '''AKA policy gradient'''
@@ -123,6 +137,7 @@ def train(sess, env, actor):
             if RENDER_ENV:
                 env.render()
             action_probabilities = actor.predict_action(np.reshape(current_state, (1, STATE_DIM)))
+            #print(action_probabilities)
             action = actor.choose_action(action_probabilities)
             actions.append(action)
             future_state, reward, done, info = env.step(action)
@@ -150,6 +165,8 @@ def train(sess, env, actor):
         discounted_rewards = calc_discounted_rewards(rewards, total_time)
         total_reward = np.sum(discounted_rewards)
         total_rewards.append(total_reward)
+        print("episode {} | total reward {} | avg reward {} | time alive {}".format(episode, total_reward,
+                total_reward/total_time, total_time))
 
     return total_times, total_rewards
 
@@ -310,16 +327,10 @@ def main(_):
     with tf.Session() as sess:
         init = tf.global_variables_initializer()
         env = gym.make(ENV_NAME)
-        if TRAINING_POLICY == 'RANDOM':
-            actor = RandomActor(sess)
-        # elif TRAINING_POLICY == 'POLICY_GRADIENT':
-        #     actor = Actor()
-
+        policies = {'random': RandomActor, 'contrarian': ContrarianActor}
+        actor = policies['contrarian'](sess)
         env = gym.wrappers.Monitor(env, MONITOR_DIR, force=True)
-
         total_times, total_rewards = train(sess, env, actor)
-        #print("times", total_times, "\n rewards", total_rewards)
-
         plot_metadata(total_times, total_rewards)
 
         # TODO save progress to resume learning weights
