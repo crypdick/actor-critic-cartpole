@@ -98,13 +98,13 @@ class PolicyGradient(Policy):
         init = tf.initialize_all_variables()
         self.sess.run(init)
 
-        self.actor = ActorNetwork()
-        self.critic = CriticNetwork()
+        self.actor = ActorNetwork(self.sess)
+        self.critic = CriticNetwork(self.sess, self.actor.n_trainable_params)
 
 
 
         # fxn: use critic action gradient to figure out how to update online actor
-        # self.training_gradients = tf.gradients(self.policy_network, self.all_net_params,
+        # self.training_gradients = tf.gradients(self.policy_network, self.trainable_net_params,
         #                                    -self.action_gradient_from_critic)
 
         # fxn: apply gradient to online actor
@@ -120,14 +120,17 @@ class PolicyGradient(Policy):
 
     def predict_rewards(self, observed_states, observed_actions):
         predicted_rewards = self.sess.run(self.critic.reward_predictor, feed_dict={
-            self.in_states: observed_states,
-            self.in_actions: observed_actions
+            self.critic.input_states: observed_states,
+            self.critic.input_actions: observed_actions
         })
         return predicted_rewards
 
     def update_policy(self, observed_states, observed_actions, observed_rewards):
         """when episode concludes, lets update our actors and critics"""
-        predicted_rewards = self.predict_rewards(observed_states, observed_actions)
+        tensor_lengths = len(observed_actions)
+        observed_actions = np.reshape(observed_actions, (tensor_lengths, 1))
+        observed_rewards = np.reshape(observed_rewards, (tensor_lengths, 1))
+        #print(np.shape(observed_states), np.shape(observed_actions), np.shape(observed_rewards))
         self.critic.optimize_critic_network(observed_states, observed_actions, observed_rewards)
         gradient_wrt_actions = self.critic.calc_action_gradient(observed_states, observed_actions)
         self.actor.optimize_actor_net(observed_states, gradient_wrt_actions)
@@ -139,8 +142,8 @@ class ActorNetwork(object):
         self.sess = sess
         self.n_units = 20
         self.input_states, self.action_predictor = self.mk_action_predictor_net()
-        self.all_net_params = tf.trainable_variables()
-        self.num_trainable_vars = len(self.all_net_params)
+        self.trainable_net_params = tf.trainable_variables()
+        self.n_trainable_params = len(self.trainable_net_params)
 
         self.gradient_wrt_actions, self.actor_optimizer = self.mk_actor_optimizer()
 
@@ -160,22 +163,27 @@ class ActorNetwork(object):
         # action gradient will be given to this by the critic network
         action_gradient_from_critic = tf.placeholder(tf.float32, [None, ACTION_DIM])
         # apply action gradient to network
-        actor_gradients = tf.gradients(self.action_predictor, self.all_net_params, -action_gradient_from_critic)
+        actor_gradients = tf.gradients(self.action_predictor, self.trainable_net_params, -action_gradient_from_critic)
         optimizer = tf.train.AdamOptimizer(ACTOR_LEARNING_RATE). \
-            apply_gradients(zip(actor_gradients, self.all_net_params))
+            apply_gradients(zip(actor_gradients, self.trainable_net_params))
         return action_gradient_from_critic, optimizer
 
     def optimize_actor_net(self, in_states, action_gradient):
         """runs optimizer using gradient from critic network"""
+        #print(np.shape(action_gradient))
         self.sess.run(self.actor_optimizer,
                       feed_dict={self.input_states: in_states, self.gradient_wrt_actions: action_gradient})
 
 
 class CriticNetwork(object):
-    def __init__(self):
+    def __init__(self, sess, n_actor_params):
+        self.sess = sess
         self.n_units = 50
 
         self.input_states, self.input_actions, self.reward_predictor = self.mk_reward_predictor_network()
+        # get full list of trainable params from tf, then slice out the ones belonging to the actor network
+        self.trainable_params = tf.trainable_variables()[n_actor_params:]
+
         self.observed_rewards, self.critic_optimizer = self.mk_reward_network_optimizer()
         self.action_gradient_calculator = self.mk_action_gradient_func()
 
@@ -207,12 +215,8 @@ class CriticNetwork(object):
         return input_states, input_actions, r_net
 
     def mk_reward_network_optimizer(self):
-        observed_rewards = tf.placeholder(tf.float32, [None, 1])
-        predicted_rewards = tf.placeholder(tf.float32, [None, 1])
-
-
-        # Define loss and optimization Op
-        loss = tflearn.mean_square(observed_rewards, predicted_rewards)
+        observed_rewards = tflearn.input_data(shape=[None, 1], name='input_rewards')
+        loss = tflearn.mean_square(observed_rewards, self.reward_predictor)
         optimizer = tf.train.AdamOptimizer(CRITIC_LEARNING_RATE).minimize(loss)
         return observed_rewards, optimizer
 
@@ -222,7 +226,7 @@ class CriticNetwork(object):
         self.sess.run([self.reward_predictor, self.critic_optimizer], feed_dict={
             self.input_states: observed_states,
             self.input_actions: observed_action,
-            self.reward_predictor: observed_rewards
+            self.observed_rewards: observed_rewards
         })
 
     def mk_action_gradient_func(self):
@@ -239,7 +243,7 @@ class CriticNetwork(object):
             self.input_states: states,
             self.input_actions: actions
         })
-
+        action_gradient = action_gradient[0]  # compensate for nested list
         return action_gradient
 
 
@@ -465,9 +469,9 @@ def main(_):
         init = tf.global_variables_initializer()
         env = gym.make(ENV_NAME)
         policies = {'random': RandomPolicy, 'contrarian': ContrarianPolicy, 'policy_gradient': PolicyGradient}
-        actor = policies['policy_gradient'](sess)
+        policy = policies['policy_gradient'](sess)
         env = gym.wrappers.Monitor(env, MONITOR_DIR, force=True)
-        total_times, total_rewards = train(sess, env, actor)
+        total_times, total_rewards = train(sess, env, policy)
         plot_metadata(total_times, total_rewards)
 
         # TODO save progress to resume learning weights
