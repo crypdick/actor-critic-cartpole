@@ -25,13 +25,13 @@ ACTION_PROB_DIMS = 2
 ACTION_BOUND = 1  # 0 to 1
 ACTION_SPACE = [0, 1]
 
-N_EPISODES = 10
-MAX_EP_STEPS = 200
+N_EPISODES = 200
+MAX_EP_STEPS = 200  # from CartPole env
 # Base learning rate for the Actor network
 ACTOR_LEARNING_RATE = 0.001  # 0.0001
 CRITIC_LEARNING_RATE = 0.001
 # Discount factor
-DISCOUNT_FACTOR = 0.99  # aka gamma
+DISCOUNT_FACTOR = 0.9  # aka gamma
 
 # https://www.youtube.com/watch?v=oPGVsoBonLM
 # policy gradient goal: maximize E[Reward|policy*]
@@ -100,7 +100,6 @@ class PolicyGradient(Policy):
         self.actor = ActorNetwork(self.sess)
         self.critic = CriticNetwork(self.sess, self.actor.n_trainable_params)
 
-
     def calc_action_probabilities(self, observed_states):
         action_probabilities = self.sess.run(self.actor.action_predictor,
                                              feed_dict={self.actor.input_states: observed_states})
@@ -120,11 +119,10 @@ class PolicyGradient(Policy):
         tensor_lengths = len(observed_actions)
         observed_actions = np.reshape(observed_actions, (tensor_lengths, 1))
         observed_rewards = np.reshape(observed_rewards, (tensor_lengths, 1))
-        #print(np.shape(observed_states), np.shape(observed_actions), np.shape(observed_rewards))
+        # print(np.shape(observed_states), np.shape(observed_actions), np.shape(observed_rewards))
         self.critic.optimize_critic_network(observed_states, observed_actions, observed_rewards)
         gradient_wrt_actions = self.critic.calc_action_gradient(observed_states, observed_actions)
         self.actor.optimize_actor_net(observed_states, gradient_wrt_actions)
-
 
 
 class ActorNetwork(object):
@@ -160,7 +158,7 @@ class ActorNetwork(object):
 
     def optimize_actor_net(self, in_states, action_gradient):
         """runs optimizer using gradient from critic network"""
-        #print(np.shape(action_gradient))
+        # print(np.shape(action_gradient))
         self.sess.run(self.actor_optimizer,
                       feed_dict={self.input_states: in_states, self.gradient_wrt_actions: action_gradient})
 
@@ -176,7 +174,6 @@ class CriticNetwork(object):
 
         self.observed_rewards, self.critic_optimizer = self.mk_reward_network_optimizer()
         self.action_gradient_calculator = self.mk_action_gradient_func()
-
 
     def mk_reward_predictor_network(self):
         """
@@ -195,8 +192,8 @@ class CriticNetwork(object):
         t2 = tflearn.fully_connected(input_actions, self.n_units)
 
         r_net = tflearn.activation(tf.matmul(r_net, t1.W) +
-                                                  tf.matmul(input_actions, t2.W) + t2.b, activation='relu',
-                                                  name='combine_state_actions')
+                                   tf.matmul(input_actions, t2.W) + t2.b, activation='relu',
+                                   name='combine_state_actions')
 
         # linear layer connected to 1 output representing Q(s,a)
         # TODO: does this have to be only one unit?
@@ -210,8 +207,8 @@ class CriticNetwork(object):
         optimizer = tf.train.AdamOptimizer(CRITIC_LEARNING_RATE).minimize(loss)
         return observed_rewards, optimizer
 
-
-    def optimize_critic_network(self, observed_states, observed_action, observed_rewards):  # note: replaced predicted_q_value with sum of mixed rewards
+    def optimize_critic_network(self, observed_states, observed_action,
+                                observed_rewards):  # note: replaced predicted_q_value with sum of mixed rewards
         """update our predictions based on observations"""
         self.sess.run([self.reward_predictor, self.critic_optimizer], feed_dict={
             self.input_states: observed_states,
@@ -239,6 +236,7 @@ class CriticNetwork(object):
 
 def train(sess, env, policy):
     # Set up summary Ops
+    # TODO use these
     summary_ops, summary_vars = build_summaries()
 
     sess.run(tf.global_variables_initializer())
@@ -263,6 +261,7 @@ def train(sess, env, policy):
             action = policy.choose_action(action_probabilities)
             actions.append(action)
             future_state, reward, done, info = env.step(action)
+            #print("reward", reward)
             rewards.append(reward)
             # print("future state ", np.shape(future_state))
 
@@ -270,7 +269,6 @@ def train(sess, env, policy):
             # low_theta_bonus = -100. * (theta ** 2.) + 1.  # reward of 1 at 0 rads, reward of 0 at +- 0.1 rad/6 deg)
             # # center_pos_bonus = -1 * abs(0.5 * x) + 1  # bonus of 1.0 at x=0, goes down to 0 as x approaches edge
             # reward += low_theta_bonus
-
 
             current_state = future_state
 
@@ -284,28 +282,37 @@ def train(sess, env, policy):
         total_times.append(total_time)
 
         discounted_rewards = calc_discounted_rewards(rewards, total_time)
-        total_reward = np.sum(discounted_rewards)
-        total_rewards.append(total_reward)
+        #print(discounted_rewards)
 
         # update policy
         policy.update_policy(states, actions, discounted_rewards)
 
-
-        print("episode {} | total reward {} | avg reward {} | time alive {}".format(episode, total_reward,
-                                                                                    total_reward / total_time,
+        print("episode {} | total reward {} | avg reward {} | time alive {}".format(episode,
+                                                                                    discounted_rewards.sum(),
+                                                                                    discounted_rewards.mean(),
                                                                                     total_time))
 
-    return total_times, total_rewards
+    return total_times, discounted_rewards.sum()
 
 
 def calc_discounted_rewards(rewards, total_time):
+    """rewards are reward at that specific timestep plus discounted value of future rewards in that trajectory"""
+    # print("r", rewards)
     discounted_rewards = np.zeros_like(rewards)
-    running_rewards = 0
+    running_rewards = 0.
     for i in range(total_time - 1, -1, -1):  # step backwards in time from the end of the episode
         discounted_rewards[i] = rewards[i] + DISCOUNT_FACTOR * running_rewards
+        running_rewards += discounted_rewards[i]
     # feature scaling/normalizing using standardization. reward vec will always have 0 mean and variance 1
-    discounted_rewards -= discounted_rewards.mean()
+    # otherwise, early rewards become astronomical as the running reward gets added to each previous ts
+    # scaled rewards are much smaller, which makes it more stable for the neural network to approximate.
+    # since we subtract the mean, we also see that the lat
+    #discounted_rewards -= discounted_rewards.mean()
+    # decided to not subtract mean because the second half of the episode will never have a positive score.
+    # that isn't necessarily good because sometimes we simply run out of time (max episode length is only 200).
+    # we don't want to always be penalizing the end of an episode
     discounted_rewards /= discounted_rewards.std()
+    #print("r", discounted_rewards)
     return discounted_rewards
 
 
@@ -322,7 +329,7 @@ def build_summaries():
 
 
 def plot_metadata(total_times, total_rewards):
-    f, axarr = plt.subplots(2, sharex=True)
+    f, axarr = plt.subplots(2, sharex=True) #sharex [True] must be one of ['all', 'row', 'col', 'none']
     x = np.arange(N_EPISODES)
     axarr[0].plot(x, total_times)
     axarr[0].set_title('Total Times')
@@ -337,7 +344,7 @@ def plot_metadata(total_times, total_rewards):
 
 def main(_):
     with tf.Session() as sess:
-        init = tf.global_variables_initializer()
+        sess.run(tf.global_variables_initializer())
         env = gym.make(ENV_NAME)
         policies = {'random': RandomPolicy, 'contrarian': ContrarianPolicy, 'policy_gradient': PolicyGradient}
         policy = policies['policy_gradient'](sess)
@@ -353,10 +360,4 @@ def main(_):
 
 
 if __name__ == '__main__':
-    '''scopes
-    global scope should be constants, put at top
-    main loop scope should have the tf session, state+action dimensionality, bounds, actor+critic networks,
-    and the episode loop.
-    '''
-
     tf.app.run()
