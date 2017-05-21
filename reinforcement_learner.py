@@ -167,6 +167,7 @@ class CriticNetwork(object):
 
         self.input_states, self.input_actions, self.output_reward_predictions = self.mk_critic_network()
         self.observed_rewards, self.critic_optimizer = self.mk_critic_network_optimizer()
+        self.action_gradient_calculator = self.mk_action_gradient_func()
 
 
     def mk_critic_network(self):
@@ -205,16 +206,28 @@ class CriticNetwork(object):
 
     def optimize_critic_network(self, observed_states, observed_action, observed_rewards):  # note: replaced predicted_q_value with sum of mixed rewards
         """update our predictions based on observations"""
-        return self.sess.run([self.output_reward_predictions, self.critic_optimizer], feed_dict={
+        self.sess.run([self.output_reward_predictions, self.critic_optimizer], feed_dict={
             self.input_states: observed_states,
             self.input_actions: observed_action,
             self.output_reward_predictions: observed_rewards
         })
 
-    def calc_action_gradient_for_actor(self):
-        """critisize our actor's predictions"""
+    def mk_action_gradient_func(self):
+        """critisize our actor's predictions
+        given actions, predict the gradient of the rewards wrt the actions"""
         # Get the gradient of the net w.r.t. the action
-        #action_grads = tf.gradients(self.onnet_out_reward, self.in_actions)
+        action_grad_calculator = tf.gradients(self.output_reward_predictions, self.input_actions)
+        return action_grad_calculator
+
+    def calc_action_gradient(self, states, actions):
+        """given states and the actions the actor took, give actor a gradient for the actor to improve its
+        actions wrt the critic's reward belief network"""
+        action_gradient = self.sess.run(self.action_gradient_calculator, feed_dict={
+            self.input_states: states,
+            self.input_actions: actions
+        })
+
+        return action_gradient
 
 
 def train(sess, env, actor):
