@@ -20,7 +20,7 @@ TENSORBOARD_RESULTS_DIR = './results/tf_results'
 # Directory for storing gym results
 MONITOR_DIR = './results/gym_ddpg'
 
-STATE_DIM = 2
+STATE_DIM = 4
 ACTION_DIM = 1
 ACTION_PROB_DIMS = 2
 ACTION_BOUND = 1  # 0 to 1
@@ -65,7 +65,7 @@ class RandomPolicy(Policy):
     def __init__(self, sess):
         super().__init__(sess)
 
-    def predict_action(self, _inputs):
+    def calc_action_probabilities(self, _):
         choice = np.random.choice(2)  # spits out 0 or 1
         if choice:  # go right
             probabilities = np.array([0., 1.])
@@ -79,7 +79,7 @@ class ContrarianPolicy(Policy):
     def __init__(self, sess):
         super().__init__(sess)
 
-    def predict_action(self, state):
+    def calc_action_probabilities(self, state):
         state = state[0]  # list in a list
         theta = state[1]
         if theta >= 0.:
@@ -91,15 +91,16 @@ class ContrarianPolicy(Policy):
 
 
 class PolicyGradient(Policy):
-    '''AKA policy gradient'''
+    """AKA policy gradient"""
 
     def __init__(self, sess):
         super().__init__(sess)
         init = tf.initialize_all_variables()
         self.sess.run(init)
 
-        self.input_states, self.actor = ActorNetwork()
+        self.actor = ActorNetwork()
         self.critic = CriticNetwork()
+
 
 
         # fxn: use critic action gradient to figure out how to update online actor
@@ -110,24 +111,37 @@ class PolicyGradient(Policy):
         # self.optimize_online_actor = tf.train.AdamOptimizer(ACTOR_LEARNING_RATE). \
         #    apply_gradients(zip(self.actor_gradients, self.online_weights), name='online_policy_optimizer')
 
-    def predict_action(self, state):
-        action_probabilities = self.sess.run(self.policy_network, feed_dict={self.input_state: state})
+    def calc_action_probabilities(self, observed_states):
+        action_probabilities = self.sess.run(self.actor.action_predictor,
+                                             feed_dict={self.actor.input_states: observed_states})
         action_probabilities = action_probabilities[0]  # reduce depth by 1
         # print("tf action probs", action_probabilities)
         return action_probabilities
+
+    def predict_rewards(self, observed_states, observed_actions):
+        predicted_rewards = self.sess.run(self.critic.reward_predictor, feed_dict={
+            self.in_states: observed_states,
+            self.in_actions: observed_actions
+        })
+        return predicted_rewards
+
+    def update_policy(self, observed_states, observed_actions, observed_rewards):
+        """when episode concludes, lets update our actors and critics"""
+        predicted_rewards = self.predict_rewards(observed_states, observed_actions)
+        self.critic.optimize_critic_network()
 
 
 class ActorNetwork(object):
     def __init__(self, sess):
         self.sess = sess
         self.n_units = 20
-        self.input_states, self.policy_network = self.mk_actor_network()
+        self.input_states, self.action_predictor = self.mk_action_predictor_net()
         self.all_net_params = tf.trainable_variables()
         self.num_trainable_vars = len(self.all_net_params)
 
         self.gradient_wrt_actions, self.actor_optimizer = self.mk_actor_optimizer()
 
-    def mk_actor_network(self):
+    def mk_action_predictor_net(self):
         """neural network that outputs probabilities of each action"""
         input_states = tflearn.input_data(shape=[None, STATE_DIM], name='input_state')
         actor_net = tflearn.fully_connected(input_states, self.n_units, activation='relu',
@@ -138,19 +152,12 @@ class ActorNetwork(object):
 
         return input_states, actor_net
 
-    def predict_action_probabilities(self, inp_states):
-        out_actions = self.sess.run(self.policy_network,
-                                    feed_dict={self.input_states: inp_states})
-        out_actions = out_actions[0]  # go into nested list
-        # print("actor output actions", out_actions)
-        return out_actions
-
     def mk_actor_optimizer(self):
         """optimizer for actor network"""
         # action gradient will be given to this by the critic network
-        action_gradient_from_critic = tf.placeholder(tf.float32, [None, self.a_dim])
+        action_gradient_from_critic = tf.placeholder(tf.float32, [None, ACTION_DIM])
         # apply action gradient to network
-        actor_gradients = tf.gradients(self.policy_network, self.all_net_params, -action_gradient_from_critic)
+        actor_gradients = tf.gradients(self.action_predictor, self.all_net_params, -action_gradient_from_critic)
         optimizer = tf.train.AdamOptimizer(ACTOR_LEARNING_RATE). \
             apply_gradients(zip(actor_gradients, self.all_net_params))
         return action_gradient_from_critic, optimizer
@@ -165,12 +172,12 @@ class CriticNetwork(object):
     def __init__(self):
         self.n_units = 50
 
-        self.input_states, self.input_actions, self.output_reward_predictions = self.mk_critic_network()
-        self.observed_rewards, self.critic_optimizer = self.mk_critic_network_optimizer()
+        self.input_states, self.input_actions, self.reward_predictor = self.mk_reward_predictor_network()
+        self.observed_rewards, self.critic_optimizer = self.mk_reward_network_optimizer()
         self.action_gradient_calculator = self.mk_action_gradient_func()
 
 
-    def mk_critic_network(self):
+    def mk_reward_predictor_network(self):
         """
         represents our belief of what rewards should be
         neural network that outputs 
@@ -191,32 +198,34 @@ class CriticNetwork(object):
 
         # linear layer connected to 1 output representing Q(s,a)
         # TODO: does this have to be only one unit?
-        output_reward_predictions = tflearn.fully_connected(net, 1, weights_init='truncated_normal')
+        net = tflearn.fully_connected(net, 1, weights_init='truncated_normal', name='output_rewards')
 
-        return input_states, input_actions, output_reward_predictions
+        return input_states, input_actions, net
 
-    def mk_critic_network_optimizer(self):
+    def mk_reward_network_optimizer(self):
         observed_rewards = tf.placeholder(tf.float32, [None, 1])
+        predicted_rewards = tf.placeholder(tf.float32, [None, 1])
+
 
         # Define loss and optimization Op
-        loss = tflearn.mean_square(observed_rewards, self.output_reward_predictions)
+        loss = tflearn.mean_square(observed_rewards, predicted_rewards)
         optimizer = tf.train.AdamOptimizer(CRITIC_LEARNING_RATE).minimize(loss)
         return observed_rewards, optimizer
 
 
     def optimize_critic_network(self, observed_states, observed_action, observed_rewards):  # note: replaced predicted_q_value with sum of mixed rewards
         """update our predictions based on observations"""
-        self.sess.run([self.output_reward_predictions, self.critic_optimizer], feed_dict={
+        self.sess.run([self.reward_predictor, self.critic_optimizer], feed_dict={
             self.input_states: observed_states,
             self.input_actions: observed_action,
-            self.output_reward_predictions: observed_rewards
+            self.reward_predictor: observed_rewards
         })
 
     def mk_action_gradient_func(self):
         """critisize our actor's predictions
         given actions, predict the gradient of the rewards wrt the actions"""
         # Get the gradient of the net w.r.t. the action
-        action_grad_calculator = tf.gradients(self.output_reward_predictions, self.input_actions)
+        action_grad_calculator = tf.gradients(self.reward_predictor, self.input_actions)
         return action_grad_calculator
 
     def calc_action_gradient(self, states, actions):
@@ -230,7 +239,7 @@ class CriticNetwork(object):
         return action_gradient
 
 
-def train(sess, env, actor):
+def train(sess, env, policy):
     # Set up summary Ops
     summary_ops, summary_vars = build_summaries()
 
@@ -245,19 +254,17 @@ def train(sess, env, actor):
         states, actions, rewards = [], [], []
 
         current_state = env.reset()
-        current_state = list(itemgetter(0, 2)(current_state))
         states.append(current_state)
         last_timestep_i = 0
 
         for ts in range(MAX_EP_STEPS):
             if RENDER_ENV:
                 env.render()
-            action_probabilities = actor.predict_action(np.reshape(current_state, (1, STATE_DIM)))
+            action_probabilities = policy.calc_action_probabilities(np.reshape(current_state, (1, STATE_DIM)))
             # print(action_probabilities)
-            action = actor.choose_action(action_probabilities)
+            action = policy.choose_action(action_probabilities)
             actions.append(action)
             future_state, reward, done, info = env.step(action)
-            future_state = list(itemgetter(0, 2)(future_state))
             rewards.append(reward)
             # print("future state ", np.shape(future_state))
 
@@ -281,6 +288,11 @@ def train(sess, env, actor):
         discounted_rewards = calc_discounted_rewards(rewards, total_time)
         total_reward = np.sum(discounted_rewards)
         total_rewards.append(total_reward)
+
+        # update policy
+        policy.update_policy(states, actions, discounted_rewards)
+
+
         print("episode {} | total reward {} | avg reward {} | time alive {}".format(episode, total_reward,
                                                                                     total_reward / total_time,
                                                                                     total_time))
