@@ -10,7 +10,6 @@ import os
 os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"  # see issue #152
 os.environ["CUDA_VISIBLE_DEVICES"] = "1"  # use correct GPU
 
-
 ENV_NAME = 'CartPole-v0'
 RENDER_ENV = True
 SAVE_METADATA = True
@@ -34,7 +33,6 @@ ACTOR_LEARNING_RATE = 0.001  # 0.0001
 # Discount factor
 DISCOUNT_FACTOR = 0.99  # aka gamma
 
-
 # https://www.youtube.com/watch?v=oPGVsoBonLM
 # policy gradient goal: maximize E[Reward|policy*]
 
@@ -47,7 +45,6 @@ grad_wrt_x(E_x(f(x)))
 we don't need to know anything about f(x), just sample from the distribution.
 
 '''
-
 
 
 class Policy(object):
@@ -76,6 +73,7 @@ class RandomPolicy(Policy):
 
         return probabilities
 
+
 class ContrarianPolicy(Policy):
     def __init__(self, sess):
         super().__init__(sess)
@@ -93,51 +91,75 @@ class ContrarianPolicy(Policy):
 
 class PolicyGradient(Policy):
     '''AKA policy gradient'''
+
     def __init__(self, sess):
         super().__init__(sess)
         init = tf.initialize_all_variables()
         self.sess.run(init)
 
-        self.actor = ActorNetwork()
+        self.input_states, self.actor = ActorNetwork()
         self.critic = CriticNetwork()
 
 
         # fxn: use critic action gradient to figure out how to update online actor
-        #self.training_gradients = tf.gradients(self.policy_network, self.all_net_params,
+        # self.training_gradients = tf.gradients(self.policy_network, self.all_net_params,
         #                                    -self.action_gradient_from_critic)
 
         # fxn: apply gradient to online actor
-        #self.optimize_online_actor = tf.train.AdamOptimizer(ACTOR_LEARNING_RATE). \
+        # self.optimize_online_actor = tf.train.AdamOptimizer(ACTOR_LEARNING_RATE). \
         #    apply_gradients(zip(self.actor_gradients, self.online_weights), name='online_policy_optimizer')
-
 
     def predict_action(self, state):
         action_probabilities = self.sess.run(self.policy_network, feed_dict={self.input_state: state})
         action_probabilities = action_probabilities[0]  # reduce depth by 1
-        #print("tf action probs", action_probabilities)
+        # print("tf action probs", action_probabilities)
         return action_probabilities
 
+
 class ActorNetwork(object):
-    def __init__(self):
+    def __init__(self, sess):
+        self.sess = sess
         self.n_units = 20
-        self.input_state, self.policy_network = self.mk_actor_network()
+        self.input_states, self.policy_network = self.mk_actor_network()
         self.all_net_params = tf.trainable_variables()
+        self.num_trainable_vars = len(self.all_net_params)
+
+        self.gradient_wrt_actions, self.optimizer = self.mk_optimizer()
 
     def mk_actor_network(self):
         """neural network that outputs probabilities of each action"""
-        in_state = tflearn.input_data(shape=[None, STATE_DIM], name='input_state')
-        layer1 = tflearn.fully_connected(in_state, self.n_units, activation='relu', weights_init='truncated_normal',
-                                         name='hidden1')
-        output_probabilities = tflearn.fully_connected(layer1, ACTION_PROB_DIMS, activation='softmax',
-                                    weights_init='truncated_normal', name='out_probabilities')
+        input_states = tflearn.input_data(shape=[None, STATE_DIM], name='input_state')
+        actor_net = tflearn.fully_connected(input_states, self.n_units, activation='relu',
+                                            weights_init='truncated_normal',
+                                            name='hidden1')
+        actor_net = tflearn.fully_connected(actor_net, ACTION_PROB_DIMS, activation='softmax',
+                                            weights_init='truncated_normal', name='output_action_probabilities')
 
-        return in_state, output_probabilities
+        return input_states, actor_net
 
-    def train(self, inputs, a_gradient):
-        self.sess.run(self.optimize, feed_dict={
-            self.onnet_in_states: inputs,
-            self.action_gradient: a_gradient
+    def predict_action_probabilities(self, inp_states):
+        out_actions = self.sess.run(self.policy_network, feed_dict={
+            self.input_states: inp_states
         })
+        out_actions = out_actions[0]  # go into nested list
+        # print("actor output actions", out_actions)
+        return out_actions
+
+    def mk_optimizer(self):
+        # action gradient will be given to this by the critic network
+        action_gradient = tf.placeholder(tf.float32, [None, self.a_dim])
+        # apply action gradient to network
+        actor_gradients = tf.gradients(self.policy_network, self.all_net_params, -action_gradient)
+        optimizer = tf.train.AdamOptimizer(ACTOR_LEARNING_RATE). \
+            apply_gradients(zip(actor_gradients, self.all_net_params))
+        return action_gradient, optimizer
+
+    def optimize_actor_net(self, in_states, action_gradient):
+        self.sess.run(self.optimizer, feed_dict={
+            self.input_states: in_states,
+            self.gradient_wrt_actions: action_gradient
+        })
+
 
 class CriticNetwork(object):
     def __init__(self):
@@ -145,7 +167,7 @@ class CriticNetwork(object):
 
 
 def train(sess, env, actor):
-# Set up summary Ops
+    # Set up summary Ops
     summary_ops, summary_vars = build_summaries()
 
     sess.run(tf.global_variables_initializer())
@@ -154,7 +176,7 @@ def train(sess, env, actor):
     total_rewards = []
 
     for episode in range(N_EPISODES):
-        #print("starting ep", episode)
+        # print("starting ep", episode)
 
         states, actions, rewards = [], [], []
 
@@ -167,7 +189,7 @@ def train(sess, env, actor):
             if RENDER_ENV:
                 env.render()
             action_probabilities = actor.predict_action(np.reshape(current_state, (1, STATE_DIM)))
-            #print(action_probabilities)
+            # print(action_probabilities)
             action = actor.choose_action(action_probabilities)
             actions.append(action)
             future_state, reward, done, info = env.step(action)
@@ -196,7 +218,8 @@ def train(sess, env, actor):
         total_reward = np.sum(discounted_rewards)
         total_rewards.append(total_reward)
         print("episode {} | total reward {} | avg reward {} | time alive {}".format(episode, total_reward,
-                total_reward/total_time, total_time))
+                                                                                    total_reward / total_time,
+                                                                                    total_time))
 
     return total_times, total_rewards
 
@@ -204,12 +227,13 @@ def train(sess, env, actor):
 def calc_discounted_rewards(rewards, total_time):
     discounted_rewards = np.zeros_like(rewards)
     running_rewards = 0
-    for i in range(total_time-1, -1, -1):  # step backwards in time from the end of the episode
+    for i in range(total_time - 1, -1, -1):  # step backwards in time from the end of the episode
         discounted_rewards[i] = rewards[i] + DISCOUNT_FACTOR * running_rewards
     # feature scaling/normalizing using standardization. reward vec will always have 0 mean and variance 1
     discounted_rewards -= discounted_rewards.mean()
     discounted_rewards /= discounted_rewards.std()
     return discounted_rewards
+
 
 # class Episode():
 #     def __init__(self, sess, env, actor):
@@ -354,6 +378,7 @@ def plot_metadata(total_times, total_rewards):
     axarr[1].set_xlabel("Episode Number")
 
     plt.show()
+
 
 def main(_):
     with tf.Session() as sess:
