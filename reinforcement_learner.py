@@ -138,14 +138,14 @@ class ActorNetwork(object):
         return input_states, actor_net
 
     def predict_action_probabilities(self, inp_states):
-        out_actions = self.sess.run(self.policy_network, feed_dict={
-            self.input_states: inp_states
-        })
+        out_actions = self.sess.run(self.policy_network,
+                                    feed_dict={self.input_states: inp_states})
         out_actions = out_actions[0]  # go into nested list
         # print("actor output actions", out_actions)
         return out_actions
 
     def mk_optimizer(self):
+        """optimizer for actor network"""
         # action gradient will be given to this by the critic network
         action_gradient = tf.placeholder(tf.float32, [None, self.a_dim])
         # apply action gradient to network
@@ -155,15 +155,41 @@ class ActorNetwork(object):
         return action_gradient, optimizer
 
     def optimize_actor_net(self, in_states, action_gradient):
-        self.sess.run(self.optimizer, feed_dict={
-            self.input_states: in_states,
-            self.gradient_wrt_actions: action_gradient
-        })
+        """runs optimizer using gradient from critic network"""
+        self.sess.run(self.optimizer,
+                      feed_dict={self.input_states: in_states, self.gradient_wrt_actions: action_gradient})
 
 
 class CriticNetwork(object):
     def __init__(self):
-        pass
+        self.n_units = 50
+
+        self.input_states, self.input_actions, self.output_rewards = self.mk_critic_network()
+
+
+    def mk_critic_network(self):
+        """
+        neural network that outputs 
+        the None in the shapes allows the critic to output a reward tensor that is whatever length any given
+        episode might be
+        """
+        input_states = tflearn.input_data(shape=[None, STATE_DIM], name='input_states')
+        input_actions = tflearn.input_data(shape=[None, ACTION_DIM], name='input_actions')
+        net = tflearn.fully_connected(input_states, self.n_units, activation='relu', name='hidden1')
+
+        # Add the action tensor in the 2nd hidden layer
+        # these two lines are hacks just to get weights and biases
+        t1 = tflearn.fully_connected(net, self.n_units)
+        t2 = tflearn.fully_connected(input_actions, self.n_units)
+
+        net = tflearn.activation(tf.matmul(net, t1.W) + tf.matmul(input_actions, t2.W) + t2.b, activation='relu',
+                                 name='combine_state_actions')
+
+        # linear layer connected to 1 output representing Q(s,a)
+        # TODO: does this have to be only one unit?
+        output_rewards = tflearn.fully_connected(net, 1, weights_init='truncated_normal')
+
+        return input_states, input_actions, output_rewards
 
 
 def train(sess, env, actor):
