@@ -3,7 +3,6 @@ import tensorflow as tf
 import gym
 import matplotlib.pyplot as plt
 import tflearn
-from operator import itemgetter  # for shrinking state size
 import os
 
 # use correct gpu
@@ -101,15 +100,6 @@ class PolicyGradient(Policy):
         self.actor = ActorNetwork(self.sess)
         self.critic = CriticNetwork(self.sess, self.actor.n_trainable_params)
 
-
-
-        # fxn: use critic action gradient to figure out how to update online actor
-        # self.training_gradients = tf.gradients(self.policy_network, self.trainable_net_params,
-        #                                    -self.action_gradient_from_critic)
-
-        # fxn: apply gradient to online actor
-        # self.optimize_online_actor = tf.train.AdamOptimizer(ACTOR_LEARNING_RATE). \
-        #    apply_gradients(zip(self.actor_gradients, self.online_weights), name='online_policy_optimizer')
 
     def calc_action_probabilities(self, observed_states):
         action_probabilities = self.sess.run(self.actor.action_predictor,
@@ -317,125 +307,6 @@ def calc_discounted_rewards(rewards, total_time):
     discounted_rewards -= discounted_rewards.mean()
     discounted_rewards /= discounted_rewards.std()
     return discounted_rewards
-
-
-# class Episode():
-#     def __init__(self, sess, env, actor):
-#         self.sess = sess
-#         self.env = env
-#         if RENDER is True:
-#             self.env.render()  # show animation window
-#
-#         self.actor = actor
-#         # import pdb; pdb.set_trace()
-#         #self.pl_calculated, self.pl_state, self.pl_actions, self.pl_advantages, self.pl_optimizer = actor
-#         #self.vl_calculated, self.vl_state, self.vl_newvals, self.vl_optimizer, self.vl_loss = critic
-#         self.total_episode_reward = 0
-#         self.states = []
-#         self.actions = []
-#         self.advantages = []
-#         self.transitions = []
-#         self.updated_rewards = []
-#         self.action_space = list(range(2))
-#         self.current_state = None
-#         self.metadata = None
-#         # TODO: if plotting, return metadata: histograms of each episode
-#
-#     def run_episode(self):
-#         full_state = self.env.reset()
-#         self.current_state = list(itemgetter(0,2)(full_state))
-#         max_episode_steps = self.env.spec.tags.get('wrapper_config.TimeLimit.max_episode_steps')
-#         #print("ts per trial", timesteps_per_trial)
-#         thetas = []
-#         for ts in range(max_episode_steps):
-#
-#             # calculate policy
-#             obs_vector = np.expand_dims(self.current_state, axis=0)  # shape (4,) --> (1,4)
-#             action_probabilities = self.actor.predict(self.current_state)
-#             #probs = sess.run(self.pl_calculated, feed_dict={self.pl_state: obs_vector})  # probability of both actions
-#             # draw action 0 with probability P(0), action 1 with P(1)
-#             action = self._select_action(action_probabilities[0])
-#
-#             # take the action in the environment
-#             old_observation = self.current_state
-#             full_state, reward, done, info = env.step(action)
-#             self.current_state = list(itemgetter(0,2)(full_state))
-#             x, theta = self.current_state
-#
-#             # custom rewards to encourage staying near center and having a low rate of theta change
-#             low_theta_bonus = -30.*(theta**2.) + 2. # reward of 2 at 0 rads, reward of 0 at +- 0.2582 rad/14.8 deg)
-#             center_pos_bonus = -1*abs(0.5*x)+1  # bonus of 1.0 at x=0, goes down to 0 as x approaches edge
-#             reward += center_pos_bonus * low_theta_bonus
-#
-#             # store whole situation
-#             self.states.append(self.current_state)
-#             action_taken = np.zeros(2)
-#             action_taken[action] = 1
-#             self.actions.append(action_taken)
-#             self.transitions.append((old_observation, action, reward))
-#             self.total_episode_reward += reward
-#             thetas.append(np.abs(self.current_state[2]))
-#
-#             if done:
-#                 #print("Episode finished after {} timesteps".format(t + 1))
-#                 break
-#
-#         # # now that we're done with episode, assign credits with discounted rewards
-#         # print(np.max(thetas))
-#         # for ts, transition in enumerate(self.transitions):
-#         #     obs, action, reward = transition
-#         #
-#         #     # calculate discounted return
-#         #     future_reward = 0
-#         #     n_future_timesteps = len(self.transitions) - ts
-#         #
-#         #     for future_ts in range(1, n_future_timesteps):
-#         #         future_reward += self.transitions[ts + future_ts][2] * decrease
-#         #         decrease = decrease * DISCOUNT_FACTOR
-#         #     obs_vector = np.expand_dims(obs, axis=0)
-#            # old_future_reward = sess.run(self.vl_calculated, feed_dict={self.vl_state: obs_vector})[0][0]
-#
-#             # # advantage: how much better was this action than normal
-#             # self.advantages.append(future_reward - old_future_reward)
-#             #
-#             # # update the value function towards new return
-#             # self.updated_rewards.append(future_reward)
-#
-#         # # update value function
-#         # updated_r_vec = np.expand_dims(self.updated_rewards, axis=1)
-#         # try:
-#         #     sess.run(self.vl_optimizer, feed_dict={self.vl_state: self.states, self.vl_newvals: updated_r_vec})
-#         # except:
-#         #     print("value gradient dump")
-#         #     print(np.shape(self.vl_state), np.shape(self.states), np.shape(self.vl_newvals), np.shape(updated_r_vec))
-#         #     print("updated rew", len(self.updated_rewards))
-#         #     raise
-#         # # real_self.vl_loss = sess.run(self.vl_loss, feed_dict={self.vl_state: states, self.vl_newvals: update_vals_vector})
-#         #
-#         # advantages_vector = np.expand_dims(self.advantages, axis=1)
-#         #
-#         # try:
-#         #     sess.run(self.pl_optimizer, feed_dict={self.pl_state: self.states, self.pl_advantages: advantages_vector, self.pl_actions: self.actions})
-#         # except:
-#         #     print("exception dump")
-#         #     print(np.shape(self.pl_state), np.shape(self.states), np.shape(self.pl_advantages), np.shape(advantages_vector), np.shape(self.pl_actions), np.shape(self.actions))
-#         #     raise
-#
-#         # return self.total_episode_reward
-#
-#     def _select_action(self, probabilities):
-#         '''
-#         :param action_space: possible actions
-#         :param probabilities: probs of selecting each action
-#         :return: selected_action
-#
-#         e.g. if action space is [0,1], probabilities are [.3, .7], draw is 0.5:
-#         thresh levels = .3, 1
-#         draw <= thresh ==> [False, True]
-#         return action_space[1]
-#         '''
-#         choice = np.random.choice(self.action_space, 1, p=probabilities)
-#         return choice
 
 
 def build_summaries():
