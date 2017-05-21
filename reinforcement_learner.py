@@ -25,7 +25,7 @@ ACTION_PROB_DIMS = 2
 ACTION_BOUND = 1  # 0 to 1
 ACTION_SPACE = [0, 1]
 
-N_EPISODES = 200
+N_EPISODES = 3000
 MAX_EP_STEPS = 200  # from CartPole env
 # Base learning rate for the Actor network
 ACTOR_LEARNING_RATE = 0.001  # 0.0001
@@ -94,8 +94,6 @@ class PolicyGradient(Policy):
 
     def __init__(self, sess):
         super().__init__(sess)
-        init = tf.initialize_all_variables()
-        self.sess.run(init)
 
         self.actor = ActorNetwork(self.sess)
         self.critic = CriticNetwork(self.sess, self.actor.n_trainable_params)
@@ -108,6 +106,7 @@ class PolicyGradient(Policy):
         return action_probabilities
 
     def predict_rewards(self, observed_states, observed_actions):
+        """in case we want to peek at our reward predictions"""
         predicted_rewards = self.sess.run(self.critic.reward_predictor, feed_dict={
             self.critic.input_states: observed_states,
             self.critic.input_actions: observed_actions
@@ -116,9 +115,6 @@ class PolicyGradient(Policy):
 
     def update_policy(self, observed_states, observed_actions, observed_rewards):
         """when episode concludes, lets update our actors and critics"""
-        tensor_lengths = len(observed_actions)
-        observed_actions = np.reshape(observed_actions, (tensor_lengths, 1))
-        observed_rewards = np.reshape(observed_rewards, (tensor_lengths, 1))
         # print(np.shape(observed_states), np.shape(observed_actions), np.shape(observed_rewards))
         self.critic.optimize_critic_network(observed_states, observed_actions, observed_rewards)
         gradient_wrt_actions = self.critic.calc_action_gradient(observed_states, observed_actions)
@@ -235,12 +231,11 @@ class CriticNetwork(object):
 
 
 def train(sess, env, policy):
+    sess.run(tf.global_variables_initializer())
     # Set up summary Ops
     # TODO use these
     summary_ops, summary_vars = build_summaries()
 
-    sess.run(tf.global_variables_initializer())
-    writer = tf.summary.FileWriter(TENSORBOARD_RESULTS_DIR, sess.graph)
     total_times = []
     total_rewards = []
 
@@ -284,13 +279,26 @@ def train(sess, env, policy):
         discounted_rewards = calc_discounted_rewards(rewards, total_time)
         #print(discounted_rewards)
 
+        # make our env observations into correct tensor shapes
+        tensor_lengths = len(actions)
+        actions = np.reshape(actions, (tensor_lengths, 1))
+        discounted_rewards = np.reshape(discounted_rewards, (tensor_lengths, 1))
+
         # update policy
         policy.update_policy(states, actions, discounted_rewards)
+        
+        # let's look at how our reward belief network is doing
+        reward_mse = np.mean((discounted_rewards - policy.predict_rewards(states, actions))**2)
 
-        print("episode {} | total reward {} | avg reward {} | time alive {}".format(episode,
-                                                                                    discounted_rewards.sum(),
-                                                                                    discounted_rewards.mean(),
-                                                                                    total_time))
+        print("episode {} | total reward {} | avg reward {} | time alive {} | reward loss {}".format(
+            episode,
+            discounted_rewards.sum(),
+            discounted_rewards.mean(),
+            total_time,
+            reward_mse
+        ))
+
+        # TODO save these
 
     return total_times, discounted_rewards.sum()
 
@@ -344,7 +352,7 @@ def plot_metadata(total_times, total_rewards):
 
 def main(_):
     with tf.Session() as sess:
-        sess.run(tf.global_variables_initializer())
+        writer = tf.summary.FileWriter(TENSORBOARD_RESULTS_DIR, sess.graph)
         env = gym.make(ENV_NAME)
         policies = {'random': RandomPolicy, 'contrarian': ContrarianPolicy, 'policy_gradient': PolicyGradient}
         policy = policies['policy_gradient'](sess)
