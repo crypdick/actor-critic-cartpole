@@ -30,6 +30,7 @@ N_EPISODES = 10
 MAX_EP_STEPS = 200
 # Base learning rate for the Actor network
 ACTOR_LEARNING_RATE = 0.001  # 0.0001
+CRITIC_LEARNING_RATE = 0.001
 # Discount factor
 DISCOUNT_FACTOR = 0.99  # aka gamma
 
@@ -124,7 +125,7 @@ class ActorNetwork(object):
         self.all_net_params = tf.trainable_variables()
         self.num_trainable_vars = len(self.all_net_params)
 
-        self.gradient_wrt_actions, self.optimizer = self.mk_optimizer()
+        self.gradient_wrt_actions, self.actor_optimizer = self.mk_actor_optimizer()
 
     def mk_actor_network(self):
         """neural network that outputs probabilities of each action"""
@@ -144,19 +145,19 @@ class ActorNetwork(object):
         # print("actor output actions", out_actions)
         return out_actions
 
-    def mk_optimizer(self):
+    def mk_actor_optimizer(self):
         """optimizer for actor network"""
         # action gradient will be given to this by the critic network
-        action_gradient = tf.placeholder(tf.float32, [None, self.a_dim])
+        action_gradient_from_critic = tf.placeholder(tf.float32, [None, self.a_dim])
         # apply action gradient to network
-        actor_gradients = tf.gradients(self.policy_network, self.all_net_params, -action_gradient)
+        actor_gradients = tf.gradients(self.policy_network, self.all_net_params, -action_gradient_from_critic)
         optimizer = tf.train.AdamOptimizer(ACTOR_LEARNING_RATE). \
             apply_gradients(zip(actor_gradients, self.all_net_params))
-        return action_gradient, optimizer
+        return action_gradient_from_critic, optimizer
 
     def optimize_actor_net(self, in_states, action_gradient):
         """runs optimizer using gradient from critic network"""
-        self.sess.run(self.optimizer,
+        self.sess.run(self.actor_optimizer,
                       feed_dict={self.input_states: in_states, self.gradient_wrt_actions: action_gradient})
 
 
@@ -164,11 +165,13 @@ class CriticNetwork(object):
     def __init__(self):
         self.n_units = 50
 
-        self.input_states, self.input_actions, self.output_rewards = self.mk_critic_network()
+        self.input_states, self.input_actions, self.output_reward_predictions = self.mk_critic_network()
+        self.observed_rewards, self.critic_optimizer = self.mk_critic_network_optimizer()
 
 
     def mk_critic_network(self):
         """
+        represents our belief of what rewards should be
         neural network that outputs 
         the None in the shapes allows the critic to output a reward tensor that is whatever length any given
         episode might be
@@ -187,9 +190,31 @@ class CriticNetwork(object):
 
         # linear layer connected to 1 output representing Q(s,a)
         # TODO: does this have to be only one unit?
-        output_rewards = tflearn.fully_connected(net, 1, weights_init='truncated_normal')
+        output_reward_predictions = tflearn.fully_connected(net, 1, weights_init='truncated_normal')
 
-        return input_states, input_actions, output_rewards
+        return input_states, input_actions, output_reward_predictions
+
+    def mk_critic_network_optimizer(self):
+        observed_rewards = tf.placeholder(tf.float32, [None, 1])
+
+        # Define loss and optimization Op
+        loss = tflearn.mean_square(observed_rewards, self.output_reward_predictions)
+        optimizer = tf.train.AdamOptimizer(CRITIC_LEARNING_RATE).minimize(loss)
+        return observed_rewards, optimizer
+
+
+    def optimize_critic_network(self, observed_states, observed_action, observed_rewards):  # note: replaced predicted_q_value with sum of mixed rewards
+        """update our predictions based on observations"""
+        return self.sess.run([self.output_reward_predictions, self.critic_optimizer], feed_dict={
+            self.input_states: observed_states,
+            self.input_actions: observed_action,
+            self.output_reward_predictions: observed_rewards
+        })
+
+    def calc_action_gradient_for_actor(self):
+        """critisize our actor's predictions"""
+        # Get the gradient of the net w.r.t. the action
+        #action_grads = tf.gradients(self.onnet_out_reward, self.in_actions)
 
 
 def train(sess, env, actor):
