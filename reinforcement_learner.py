@@ -89,25 +89,36 @@ class ContrarianActor(Actor):
 
         return probabilities
 
-#
-# class Actor(object):
-#     '''AKA policy gradient'''
-#     def __init__(self, sess):
-#         self.sess = sess
-#
-#
-#         with tf.variable_scope("policy"):
-#             weights = tf.get_variable("weights", [4, 2])
-#             state = tf.placeholder("float", [None, 4], name='state')
-#             actions = tf.placeholder("float", [None, 2], name='actions')
-#             advantages = tf.placeholder("float", [None, 1], name='advantages')
-#             Wx = tf.matmul(state, weights, name='Wx')
-#             probabilities = tf.nn.softmax(Wx, name='probabilities')
-#             good_probabilities = tf.reduce_sum(tf.multiply(probabilities, actions), reduction_indices=[1])
-#             eligibility = tf.log(good_probabilities) * advantages
-#             loss = -tf.reduce_sum(eligibility)
-#             optimizer = tf.train.AdamOptimizer(0.01).minimize(loss)
-#             return probabilities, state, actions, advantages, optimizer
+
+class PolicyGradientActor(Actor):
+    '''AKA policy gradient'''
+    def __init__(self, sess):
+        super().__init__(sess)
+        init = tf.initialize_all_variables()
+        sess.run(init)
+
+        self.n_units = 20
+        self.learning_rate = 1e-2
+        self.discount_factor = 0.99  # how much we decrease rewards from the future AKA gamma
+
+        self.input_state, self.policy_network = self.mk_policy_network()
+
+    def mk_policy_network(self):
+        """neural network that outputs probabilities of each action"""
+        in_state = tflearn.input_data(shape=[None, STATE_DIM], name='input_state')
+        layer1 = tflearn.fully_connected(in_state, self.n_units, activation='relu', weights_init='truncated_normal',
+                                         name='hidden1')
+        output_probabilities = tflearn.fully_connected(layer1, ACTION_DIM, activation='sigmoid',
+                                    weights_init='truncated_normal', name='out_probabilities')
+
+        return in_state, output_probabilities
+
+
+    def predict_action(self, state):
+        action_probabilities = self.sess.run(self.policy_network, feed_dict={self.input_state: state})
+        action_probabilities = action_probabilities[0]  # reduce depth by 1
+        #print("tf action probs", action_probabilities)
+        return action_probabilities
 
 
 '''
@@ -327,8 +338,8 @@ def main(_):
     with tf.Session() as sess:
         init = tf.global_variables_initializer()
         env = gym.make(ENV_NAME)
-        policies = {'random': RandomActor, 'contrarian': ContrarianActor}
-        actor = policies['contrarian'](sess)
+        policies = {'random': RandomActor, 'contrarian': ContrarianActor, 'policy_gradient': PolicyGradientActor}
+        actor = policies['policy_gradient'](sess)
         env = gym.wrappers.Monitor(env, MONITOR_DIR, force=True)
         total_times, total_rewards = train(sess, env, actor)
         plot_metadata(total_times, total_rewards)
