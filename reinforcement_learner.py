@@ -106,9 +106,12 @@ def train(sess, env, actor):
 
     sess.run(tf.global_variables_initializer())
     writer = tf.summary.FileWriter(TENSORBOARD_RESULTS_DIR, sess.graph)
-
+    total_times = []
+    total_rewards = []
 
     for episode in range(N_EPISODES):
+        #print("starting ep", episode)
+
         states, actions, rewards = [], [], []
 
         current_state = env.reset()
@@ -124,13 +127,14 @@ def train(sess, env, actor):
             actions.append(action)
             future_state, reward, done, info = env.step(action)
             future_state = list(itemgetter(0, 2)(future_state))
+            rewards.append(reward)
             # print("future state ", np.shape(future_state))
 
             # x, theta = future_state
             # low_theta_bonus = -100. * (theta ** 2.) + 1.  # reward of 1 at 0 rads, reward of 0 at +- 0.1 rad/6 deg)
             # # center_pos_bonus = -1 * abs(0.5 * x) + 1  # bonus of 1.0 at x=0, goes down to 0 as x approaches edge
             # reward += low_theta_bonus
-            # rewards.append(reward)
+
 
             current_state = future_state
 
@@ -138,7 +142,25 @@ def train(sess, env, actor):
                 states.append(future_state)
             else:
                 last_timestep_i = ts  # max /index/; len(timesteps) == max_i + 1
+
                 break
+        total_time = last_timestep_i + 1
+        total_times.append(total_time)
+
+        discounted_rewards = calc_discounted_rewards(rewards, total_time)
+        total_reward = np.sum(discounted_rewards)
+        total_rewards.append(total_reward)
+
+    return total_times, total_rewards
+
+def calc_discounted_rewards(rewards, total_time):
+    discounted_rewards = np.zeros_like(rewards)
+    running_rewards = 0
+    for i in range(total_time-1, -1, -1):  # step backwards in time from the end of the episode
+        discounted_rewards[i] = rewards[i] + DISCOUNT_FACTOR * running_rewards
+    #discounted_rewards -= discounted_rewards.mean()
+    #discounted_rewards /= discounted_rewards.std()
+    return discounted_rewards
 
 # class Episode():
 #     def __init__(self, sess, env, actor):
@@ -271,6 +293,19 @@ def build_summaries():
     return summary_ops, summary_vars
 
 
+def plot_metadata(total_times, total_rewards):
+    f, axarr = plt.subplots(2, sharex=True)
+    x = np.arange(N_EPISODES)
+    axarr[0].plot(x, total_times)
+    axarr[0].set_title('Total Times')
+    axarr[0].set_ylabel("Time")
+    axarr[1].scatter(x, total_rewards)
+    axarr[1].set_title('Total Rewards')
+    axarr[1].set_ylabel("Rewards")
+    axarr[1].set_xlabel("Episode Number")
+
+    plt.show()
+
 def main(_):
     with tf.Session() as sess:
         init = tf.global_variables_initializer()
@@ -282,15 +317,13 @@ def main(_):
 
         env = gym.wrappers.Monitor(env, MONITOR_DIR, force=True)
 
-        reward_timeline = train(sess, env, actor)
+        total_times, total_rewards = train(sess, env, actor)
+        #print("times", total_times, "\n rewards", total_rewards)
+
+        plot_metadata(total_times, total_rewards)
 
         # TODO save progress to resume learning weights
 
-        '''
-        TODO: make series of graphs I talked about in the capstone proposal
-        '''
-        # plt.plot(np.arange(len(reward_timeline)), reward_timeline)
-        # plt.show()
         # TODO: figure out how to make tf tensorboard graphs
 
         # gym.upload('/tmp/cartpole-experiment-1', api_key='ZZZ')
