@@ -128,7 +128,10 @@ class PolicyGradient(Policy):
     def update_policy(self, observed_states, observed_actions, observed_rewards):
         """when episode concludes, lets update our actors and critics"""
         predicted_rewards = self.predict_rewards(observed_states, observed_actions)
-        self.critic.optimize_critic_network()
+        self.critic.optimize_critic_network(observed_states, observed_actions, observed_rewards)
+        gradient_wrt_actions = self.critic.calc_action_gradient(observed_states, observed_actions)
+        self.actor.optimize_actor_net(observed_states, gradient_wrt_actions)
+
 
 
 class ActorNetwork(object):
@@ -186,21 +189,22 @@ class CriticNetwork(object):
         """
         input_states = tflearn.input_data(shape=[None, STATE_DIM], name='input_states')
         input_actions = tflearn.input_data(shape=[None, ACTION_DIM], name='input_actions')
-        net = tflearn.fully_connected(input_states, self.n_units, activation='relu', name='hidden1')
+        r_net = tflearn.fully_connected(input_states, self.n_units, activation='relu', name='hidden1')
 
         # Add the action tensor in the 2nd hidden layer
         # these two lines are hacks just to get weights and biases
-        t1 = tflearn.fully_connected(net, self.n_units)
+        t1 = tflearn.fully_connected(r_net, self.n_units)
         t2 = tflearn.fully_connected(input_actions, self.n_units)
 
-        net = tflearn.activation(tf.matmul(net, t1.W) + tf.matmul(input_actions, t2.W) + t2.b, activation='relu',
-                                 name='combine_state_actions')
+        r_net = tflearn.activation(tf.matmul(r_net, t1.W) +
+                                                  tf.matmul(input_actions, t2.W) + t2.b, activation='relu',
+                                                  name='combine_state_actions')
 
         # linear layer connected to 1 output representing Q(s,a)
         # TODO: does this have to be only one unit?
-        net = tflearn.fully_connected(net, 1, weights_init='truncated_normal', name='output_rewards')
+        r_net = tflearn.fully_connected(r_net, 1, weights_init='truncated_normal', name='output_rewards')
 
-        return input_states, input_actions, net
+        return input_states, input_actions, r_net
 
     def mk_reward_network_optimizer(self):
         observed_rewards = tf.placeholder(tf.float32, [None, 1])
