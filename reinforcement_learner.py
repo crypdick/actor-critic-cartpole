@@ -92,7 +92,7 @@ class PolicyGradient(Policy):
         super().__init__(sess)
 
         self.actor = ActorNetwork(self.sess)
-        self.critic = CriticNetwork(self.sess, self.actor.n_trainable_params)
+        # self.critic = CriticNetwork(self.sess, self.actor.n_trainable_params)
 
     def calc_action_probabilities(self, observed_states):
         action_probabilities = self.sess.run(self.actor.action_predictor,
@@ -102,20 +102,21 @@ class PolicyGradient(Policy):
         action_probabilities = action_probabilities[0]  # reduce depth by 1
         return action_probabilities
 
-    def predict_rewards(self, observed_states, observed_actions):
-        """in case we want to peek at our reward predictions"""
-        predicted_rewards = self.sess.run(self.critic.reward_predictor, feed_dict={
-            self.critic.input_states: observed_states,
-            self.critic.input_actions: observed_actions
-        })
-        return predicted_rewards
+    # def predict_rewards(self, observed_states, observed_actions):
+    #     """in case we want to peek at our reward predictions"""
+    #     predicted_rewards = self.sess.run(self.critic.reward_predictor, feed_dict={
+    #         self.critic.input_states: observed_states,
+    #         self.critic.input_actions: observed_actions
+    #     })
+    #     return predicted_rewards
 
-    def update_policy(self, observed_states, observed_actions, observed_rewards):
-        """when episode concludes, lets update our actors and critics"""
+    # def update_policy(self, observed_states, observed_actions, action_probability_timeline, observed_rewards):
+    #     """when episode concludes, lets update our actors and critics"""
         # print(np.shape(observed_states), np.shape(observed_actions), np.shape(observed_rewards))
-        self.critic.optimize_critic_network(observed_states, observed_actions, observed_rewards)
-        gradient_wrt_actions = self.critic.calc_action_gradient(observed_states, observed_actions)
-        self.actor.optimize_actor_net(observed_states, gradient_wrt_actions)
+        # self.critic.optimize_critic_network(observed_states, observed_actions, observed_rewards)
+        # gradient_wrt_actions = self.critic.calc_action_gradient(observed_states, observed_actions)
+        # self.actor.optimize_actor_net(observed_states, gradient_wrt_actions)
+
 
 
 class ActorNetwork(object):
@@ -126,7 +127,17 @@ class ActorNetwork(object):
         self.trainable_net_params = tf.trainable_variables()
         self.n_trainable_params = len(self.trainable_net_params)
 
-        self.gradient_wrt_actions, self.actor_optimizer = self.mk_actor_optimizer()
+        # self.gradient_wrt_actions, self.actor_optimizer = self.mk_actor_optimizer()
+        # to calculate cross entropy on probabilities, need to take log to get logits
+        # self.loss, self.discounted_rewards, self.step_optimizer = self.mk_trainer()
+        # Define loss and optimizer
+        self.actions_taken = tf.placeholder(tf.float32, [None, ACTION_PROB_DIMS])
+        self.loss = tf.nn.l2_loss(self.actions_taken - self.action_predictor)
+        # self.loss = -tf.reduce_sum(*tf.log(self.action_predictor), 1)
+        self.train_step = tf.train.GradientDescentOptimizer(0.5).minimize(self.loss)
+    # def calculate_loss(self, actions_taken):
+    #     loss = -tf.reduce_sum(actions_taken*tf.log(self.action_predictor), 1)
+    #     return loss
 
     def mk_action_predictor_net(self):
         """neural network that outputs probabilities of each action"""
@@ -154,105 +165,122 @@ class ActorNetwork(object):
 
             return input_states, actor_net
 
-    def mk_actor_optimizer(self):
-        """optimizer for actor network"""
-        with tf.name_scope('optimizer'):
-            # action gradient will be given to this by the critic network
-            action_gradient_from_critic = tf.placeholder(tf.float32, [None, ACTION_DIM])
-            # apply action gradient to network
-            actor_gradients = tf.gradients(self.action_predictor, self.trainable_net_params, -action_gradient_from_critic)
-            optimizer = tf.train.AdamOptimizer(ACTOR_LEARNING_RATE). \
-                apply_gradients(zip(actor_gradients, self.trainable_net_params))
-            return action_gradient_from_critic, optimizer
+    # def mk_actor_optimizer(self):
+    #     """optimizer for actor network"""
+    #     with tf.name_scope('optimizer'):
+    #         # action gradient will be giv
+    #         # apply action gradient to network
+    #         actor_gradients = tf.gradients(self.action_predictor, self.trainable_net_params, -action_gradient_from_critic)
+    #         optimizer = tf.train.AdamOptimizer(ACTOR_LEARNING_RATE). \
+    #             apply_gradients(zip(actor_gradients, self.trainable_net_params))
+    #         return action_gradient_from_critic, optimizer
+    #
+    # def optimize_actor_net(self, in_states, action_gradient):
+    #     """runs optimizer using gradient from critic network"""
+    #     # print(np.shape(action_gradient))
+    #     self.sess.run(self.actor_optimizer,
+    #                   feed_dict={self.input_states: in_states, self.gradient_wrt_actions: action_gradient})
 
-    def optimize_actor_net(self, in_states, action_gradient):
-        """runs optimizer using gradient from critic network"""
-        # print(np.shape(action_gradient))
-        self.sess.run(self.actor_optimizer,
-                      feed_dict={self.input_states: in_states, self.gradient_wrt_actions: action_gradient})
+    # def mk_trainer(self):
+    #     # actions_taken = tf.placeholder(dtype=tf.float32, shape=[None, ACTION_PROB_DIMS], name="actions_taken")
+    #     # action_probabilities = tf.placeholder(dtype=tf.float32, shape=[None, ACTION_PROB_DIMS], name="action_predictions")
+    #     discounted_rewards = tf.placeholder(dtype=tf.float32, shape=[None, 1], name="discounted_rewards")
+    #     # loss = tf.nn.l2_loss(actions_taken - action_probabilities)  # this gradient encourages the actions taken
+    #     loss = tf.placeholder(dtype=tf.float32, shape=[None, 1], name='loss')
+    #     optimizer = tf.train.RMSPropOptimizer(ACTOR_LEARNING_RATE, decay=0.99)  # decay rate chosen arbitrarily
+    #
+    #     optimizer_step = optimizer.apply_gradients(action_gradients)
+    #     return loss, discounted_rewards, optimizer_step
+
+    def update_policy(self, input_states, actions_taken): #, action_probability_timeline, observed_rewards):
+        """when episode concludes, lets update our actors and critics"""
+        # loss = tf.nn.l2_loss(actions_taken - action_probability_timeline)  # this gradient encourages the actions taken
+        self.sess.run(self.train_step,
+                  {self.input_states: input_states, #self.action_probabilities: action_probability_timeline,
+                   self.actions_taken: actions_taken})  # parameter update
 
 
-class CriticNetwork(object):
-    def __init__(self, sess, n_actor_params):
-        self.sess = sess
-        self.n_units = 200
-
-        self.input_states, self.input_actions, self.reward_predictor = self.mk_reward_predictor_network()
-        # get full list of trainable params from tf, then slice out the ones belonging to the actor network
-        self.trainable_params = tf.trainable_variables()[n_actor_params:]
-
-        self.observed_rewards, self.critic_optimizer = self.mk_reward_network_optimizer()
-        self.action_gradient_calculator = self.mk_action_gradient_func()
-
-    def mk_reward_predictor_network(self):
-        """
-        represents our belief of what rewards should be
-        neural network that outputs 
-        the None in the shapes allows the critic to output a reward tensor that is whatever length any given
-        episode might be
-        """
-        with tf.name_scope('reward_predictor'):
-            input_states = tflearn.input_data(shape=[None, STATE_DIM], name='input_states')
-            input_actions = tflearn.input_data(shape=[None, ACTION_DIM], name='input_actions')
-            r_net = tflearn.fully_connected(input_states, self.n_units, activation='relu', name='hidden1')
-            tflearn.summaries.add_trainable_vars_summary([r_net.W], name_prefix='hidden1')
-
-            # Add the action tensor in the 2nd hidden layer
-            # these two lines are hacks just to get weights and biases
-            # TODO: should I change this architecture? The graph on tensorboard looks like a mess
-            t1 = tflearn.fully_connected(r_net, self.n_units, name='temp_hidden1')
-            t2 = tflearn.fully_connected(input_actions, self.n_units, name='temp_hidden2')
-
-            r_net = tflearn.activation(tf.matmul(r_net, t1.W) +
-                                       tf.matmul(input_actions, t2.W) + t2.b, activation='relu',
-                                       name='combine_state_actions')
-            # tflearn.summaries.add_activations_summary([r_net], name_prefix='combine_state_actions')
-
-            # linear layer connected to 1 output representing Q(s,a)
-            # TODO: does this have to be only one unit?
-            r_net = tflearn.dropout(r_net, 0.5, name='critic_dropout')
-            r_net = tflearn.fully_connected(r_net, 1, weights_init='truncated_normal',
-                                            bias=True, bias_init='zeros',
-                                            name='output_rewards')
-            tflearn.summaries.add_trainable_vars_summary([r_net.W, r_net.b], name_prefix='output_rewards')
-
-            return input_states, input_actions, r_net
-
-    def mk_reward_network_optimizer(self):
-        with tf.name_scope('reward_net_optimizer'):
-            observed_rewards = tflearn.input_data(shape=[None, 1], name='input_rewards')
-            loss = tflearn.mean_square(observed_rewards, self.reward_predictor)
-            optimizer = tf.train.AdamOptimizer(CRITIC_LEARNING_RATE).minimize(loss)
-            return observed_rewards, optimizer
-
-    def optimize_critic_network(self, observed_states, observed_action,
-                                observed_rewards):  # note: replaced predicted_q_value with sum of mixed rewards
-        """update our predictions based on observations"""
-        self.sess.run([self.reward_predictor, self.critic_optimizer], feed_dict={
-            self.input_states: observed_states,
-            self.input_actions: observed_action,
-            self.observed_rewards: observed_rewards
-        })
-
-    def mk_action_gradient_func(self):
-        """critisize our actor's predictions
-        given actions, predict the gradient of the rewards wrt the actions"""
-        with tf.name_scope('action_gradient_calculator'):
-            # Get the gradient of the net w.r.t. the action
-            action_grad_calculator = tf.gradients(self.reward_predictor, self.input_actions)
-            # print(type(action_grad_calculator),np.shape(action_grad_calculator), action_grad_calculator)
-            # tflearn.helpers.summarizer.summarize_gradients([action_grad_calculator])
-            return action_grad_calculator
-
-    def calc_action_gradient(self, states, actions):
-        """given states and the actions the actor took, give actor a gradient for the actor to improve its
-        actions wrt the critic's reward belief network"""
-        action_gradient = self.sess.run(self.action_gradient_calculator, feed_dict={
-            self.input_states: states,
-            self.input_actions: actions
-        })
-        action_gradient = action_gradient[0]  # compensate for nested list
-        return action_gradient
+# class CriticNetwork(object):
+#     def __init__(self, sess, n_actor_params):
+#         self.sess = sess
+#         self.n_units = 200
+#
+#         self.input_states, self.input_actions, self.reward_predictor = self.mk_reward_predictor_network()
+#         # get full list of trainable params from tf, then slice out the ones belonging to the actor network
+#         self.trainable_params = tf.trainable_variables()[n_actor_params:]
+#
+#         self.observed_rewards, self.critic_optimizer = self.mk_reward_network_optimizer()
+#         self.action_gradient_calculator = self.mk_action_gradient_func()
+#
+#     def mk_reward_predictor_network(self):
+#         """
+#         represents our belief of what rewards should be
+#         neural network that outputs
+#         the None in the shapes allows the critic to output a reward tensor that is whatever length any given
+#         episode might be
+#         """
+#         with tf.name_scope('reward_predictor'):
+#             input_states = tflearn.input_data(shape=[None, STATE_DIM], name='input_states')
+#             input_actions = tflearn.input_data(shape=[None, ACTION_DIM], name='input_actions')
+#             r_net = tflearn.fully_connected(input_states, self.n_units, activation='relu', name='hidden1')
+#             tflearn.summaries.add_trainable_vars_summary([r_net.W], name_prefix='hidden1')
+#
+#             # Add the action tensor in the 2nd hidden layer
+#             # these two lines are hacks just to get weights and biases
+#             # TODO: should I change this architecture? The graph on tensorboard looks like a mess
+#             t1 = tflearn.fully_connected(r_net, self.n_units, name='temp_hidden1')
+#             t2 = tflearn.fully_connected(input_actions, self.n_units, name='temp_hidden2')
+#
+#             r_net = tflearn.activation(tf.matmul(r_net, t1.W) +
+#                                        tf.matmul(input_actions, t2.W) + t2.b, activation='relu',
+#                                        name='combine_state_actions')
+#             # tflearn.summaries.add_activations_summary([r_net], name_prefix='combine_state_actions')
+#
+#             # linear layer connected to 1 output representing Q(s,a)
+#             # TODO: does this have to be only one unit?
+#             r_net = tflearn.dropout(r_net, 0.5, name='critic_dropout')
+#             r_net = tflearn.fully_connected(r_net, 1, weights_init='truncated_normal',
+#                                             bias=True, bias_init='zeros',
+#                                             name='output_rewards')
+#             tflearn.summaries.add_trainable_vars_summary([r_net.W, r_net.b], name_prefix='output_rewards')
+#
+#             return input_states, input_actions, r_net
+#
+#     def mk_reward_network_optimizer(self):
+#         with tf.name_scope('reward_net_optimizer'):
+#             observed_rewards = tflearn.input_data(shape=[None, 1], name='input_rewards')
+#             loss = tflearn.mean_square(observed_rewards, self.reward_predictor)
+#             optimizer = tf.train.AdamOptimizer(CRITIC_LEARNING_RATE).minimize(loss)
+#             return observed_rewards, optimizer
+#
+#     def optimize_critic_network(self, observed_states, observed_action,
+#                                 observed_rewards):  # note: replaced predicted_q_value with sum of mixed rewards
+#         """update our predictions based on observations"""
+#         self.sess.run([self.reward_predictor, self.critic_optimizer], feed_dict={
+#             self.input_states: observed_states,
+#             self.input_actions: observed_action,
+#             self.observed_rewards: observed_rewards
+#         })
+#
+#     def mk_action_gradient_func(self):
+#         """critisize our actor's predictions
+#         given actions, predict the gradient of the rewards wrt the actions"""
+#         with tf.name_scope('action_gradient_calculator'):
+#             # Get the gradient of the net w.r.t. the action
+#             action_grad_calculator = tf.gradients(self.reward_predictor, self.input_actions)
+#             # print(type(action_grad_calculator),np.shape(action_grad_calculator), action_grad_calculator)
+#             # tflearn.helpers.summarizer.summarize_gradients([action_grad_calculator])
+#             return action_grad_calculator
+#
+#     def calc_action_gradient(self, states, actions):
+#         """given states and the actions the actor took, give actor a gradient for the actor to improve its
+#         actions wrt the critic's reward belief network"""
+#         action_gradient = self.sess.run(self.action_gradient_calculator, feed_dict={
+#             self.input_states: states,
+#             self.input_actions: actions
+#         })
+#         action_gradient = action_gradient[0]  # compensate for nested list
+#         return action_gradient
 
 
 def train(sess, env, policy):
@@ -267,7 +295,7 @@ def train(sess, env, policy):
     for episode_i in range(N_EPISODES):
         # print("starting ep", episode)
 
-        states, actions, rewards = [], [], []
+        states, actions, action_probability_timeline, rewards = [], [], [], []
 
         current_state = env.reset()
         states.append(current_state)
@@ -277,6 +305,7 @@ def train(sess, env, policy):
             if RENDER_ENV:
                 env.render()
             action_probabilities = policy.calc_action_probabilities(np.reshape(current_state, (1, STATE_DIM)))
+            action_probability_timeline.append(action_probabilities)
             # print(action_probabilities)
             action = policy.choose_action(action_probabilities)
             actions.append(action)
@@ -307,22 +336,22 @@ def train(sess, env, policy):
         # make our env observations into correct tensor shapes
         tensor_lengths = len(actions)
         actions = np.reshape(actions, (tensor_lengths, 1))
+        action_probability_timeline = np.reshape(action_probability_timeline, (tensor_lengths, ACTION_PROB_DIMS))
         discounted_rewards = np.reshape(discounted_rewards, (tensor_lengths, 1))
 
         # update policy
-        policy.update_policy(states, actions, discounted_rewards)
-
+        policy.actor.update_policy(states, action_probability_timeline)  # fixme this should use rewards
         # total_rewards.append(discounted_rewards.sum())
 
         # let's look at how our reward belief network is doing
-        reward_mse = np.mean((discounted_rewards - policy.predict_rewards(states, actions))**2)
+        # reward_mse = np.mean((discounted_rewards - policy.predict_rewards(states, actions))**2)
         # reward_mses.append(reward_mse)
 
         summary_str = sess.run(summary_ops, feed_dict={
             summary_vars[0]: episode_length,
             summary_vars[1]: discounted_rewards.sum(),
-            summary_vars[2]: discounted_rewards.mean(),
-            summary_vars[3]: reward_mse,
+            summary_vars[2]: discounted_rewards.mean()#,
+            # summary_vars[3]: reward_mse,
 
         })
 
@@ -370,10 +399,10 @@ def build_summaries():
     tf.summary.scalar("Total discounted reward", episode_sum_discounted_reward)
     episode_avg_reward = tf.Variable(0.)
     tf.summary.scalar("Average Reward per action", episode_avg_reward)
-    reward_mses = tf.Variable(0.)
-    tf.summary.scalar("Reward MSE", reward_mses)
+    # reward_mses = tf.Variable(0.)
+    # tf.summary.scalar("Reward MSE", reward_mses)
 
-    summary_vars = [episode_time, episode_sum_discounted_reward, episode_avg_reward, reward_mses]
+    summary_vars = [episode_time, episode_sum_discounted_reward, episode_avg_reward]#, reward_mses]
     summary_ops = tf.summary.merge_all()
 
     return summary_ops, summary_vars
