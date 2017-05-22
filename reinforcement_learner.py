@@ -1,7 +1,6 @@
 import numpy as np
 import tensorflow as tf
 import gym
-#import matplotlib.pyplot as plt
 import tflearn
 import os
 
@@ -21,10 +20,10 @@ ACTION_PROB_DIMS = 2
 ACTION_BOUND = 1  # 0 to 1
 ACTION_SPACE = [0, 1]
 
-N_EPISODES = 10
+N_EPISODES = 1#50000
 MAX_EP_STEPS = 200  # from CartPole env
-ACTOR_LEARNING_RATE = 0.0001
-CRITIC_LEARNING_RATE = 0.0001
+# ACTOR_LEARNING_RATE = 0.0001
+# CRITIC_LEARNING_RATE = 0.0001
 # discount factor
 # the relevant window into the future is about 10 timesteps. (1 *0.7)^10 shrinks to 3% after 10 timesteps.
 DISCOUNT_FACTOR = 0.7  # aka gamma
@@ -40,10 +39,18 @@ we don't need to know anything about f(x), just sample from the distribution.
 
 '''
 
+def make_hparam_string(learning_rate, n_neurons, use_two_fc, use_dropout):
+  dropout = "dropout={}".format(use_dropout)
+  fc_param = "fc=2" if use_two_fc else "fc=1"
+  neurons = "n_neurons={}".format(n_neurons)
+  return "lr_%.0E,n_%s,%s,%s" % (learning_rate, neurons, dropout, fc_param)
+
+
 
 class Policy(object):
     def __init__(self, sess):
         self.sess = sess
+
         self.state_dim = STATE_DIM
         self.action_dim = ACTION_DIM
         self.action_bounds = ACTION_BOUND
@@ -55,7 +62,7 @@ class Policy(object):
 
 
 class RandomPolicy(Policy):
-    def __init__(self, sess):
+    def __init__(self, *args, sess=None):
         super().__init__(sess)
 
     def calc_action_probabilities(self, _):
@@ -69,7 +76,7 @@ class RandomPolicy(Policy):
 
 
 class ContrarianPolicy(Policy):
-    def __init__(self, sess):
+    def __init__(self, *args, sess=None):
         super().__init__(sess)
 
     def calc_action_probabilities(self, state):
@@ -84,10 +91,10 @@ class ContrarianPolicy(Policy):
 
 
 class PolicyGradient(Policy):
-    def __init__(self, sess):
+    def __init__(self, *args, sess=None):
         super().__init__(sess)
 
-        self.actor = ActorNetwork(self.sess)
+        self.actor = ActorNetwork(self.sess, *args)
         # self.critic = CriticNetwork(self.sess, self.actor.n_trainable_params)
 
     def calc_action_probabilities(self, observed_states):
@@ -116,9 +123,12 @@ class PolicyGradient(Policy):
 
 
 class ActorNetwork(object):
-    def __init__(self, sess):
+    def __init__(self, sess, learning_rate, n_neurons, use_two_fc, use_dropout):
         self.sess = sess
-        self.n_units = 50
+        self.learning_rate = learning_rate
+        self.n_units = n_neurons
+        self.use_two_fc = use_two_fc
+        self.use_dropout = use_dropout
         self.input_states, self.action_predictor = self.mk_action_predictor_net()
         self.trainable_net_params = tf.trainable_variables()
         self.n_trainable_params = len(self.trainable_net_params)
@@ -132,7 +142,8 @@ class ActorNetwork(object):
 
             log_action_probability = tf.reduce_sum(self.action_taken*tf.log(self.action_predictor))
             self.loss = -log_action_probability * self.input_rewards  # could also switch to l2 loss
-            self.optimizer = tf.train.AdamOptimizer(ACTOR_LEARNING_RATE).minimize(self.loss)
+            tf.summary.scalar('loss', self.loss)
+            self.optimizer = tf.train.AdamOptimizer(self.learning_rate).minimize(self.loss)
 
     def mk_action_predictor_net(self):
         """neural network that outputs probabilities of each action"""
@@ -140,15 +151,16 @@ class ActorNetwork(object):
             input_states = tflearn.input_data(shape=[None, STATE_DIM], name='input_state')
             actor_net = tflearn.fully_connected(input_states, self.n_units, activation='relu',
                                                 weights_init='truncated_normal',
-                                                name='hidden1')
+                                                name='fc1')
             tflearn.summaries.add_trainable_vars_summary([actor_net.W, actor_net.b], name_prefix='hidden1')
-            actor_net = tflearn.dropout(actor_net, 0.5, name='actor_dropout')
-            # actor_net = tflearn.fully_connected(actor_net, ACTION_PROB_DIMS,
-            #                                     weights_init='truncated_normal', bias=True, bias_init='zeros',
-            #                                     name='output_action_probabilities')
+            if self.use_two_fc:
+                actor_net = tflearn.fully_connected(actor_net,
+                                                    name='fc2')
+            if self.use_dropout:
+                actor_net = tflearn.dropout(actor_net, 0.5, name='actor_dropout')
             actor_net = tflearn.fully_connected(actor_net, ACTION_PROB_DIMS, activation='softmax',
-                                                weights_init='truncated_normal', bias=True, bias_init='zeros',
-                                                name='output_action_probabilities')
+                                                weights_init='truncated_normal', bias=True, bias_init='truncated_normal',
+                                                name='fc3_output_action_probabilities')
             tflearn.summaries.add_trainable_vars_summary([actor_net.W, actor_net.b], name_prefix='final_layer')
 
             return input_states, actor_net
@@ -271,9 +283,15 @@ class ActorNetwork(object):
 #         return action_gradient
 
 
-def train(sess, env, policy):
+def train(learning_rate, n_neurons, use_two_fc, use_dropout, hparam):
+    tf.reset_default_graph()
+    sess = tf.Session()
+    env = gym.make(ENV_NAME)
+    policies = {'random': RandomPolicy, 'contrarian': ContrarianPolicy, 'policy_gradient': PolicyGradient}
+    policy = policies['policy_gradient'](learning_rate, n_neurons, use_two_fc, use_dropout, sess=sess)
+    env = gym.wrappers.Monitor(env, VIDEO_DIR, force=True)
     sess.run(tf.global_variables_initializer())
-    writer = tf.summary.FileWriter(TENSORBOARD_RESULTS_DIR, sess.graph)
+    writer = tf.summary.FileWriter(TENSORBOARD_RESULTS_DIR+hparam, sess.graph)
     summary_ops, summary_vars = build_summaries()
 
     for episode_i in range(N_EPISODES):
@@ -410,12 +428,14 @@ def build_summaries():
 
 
 def main(_):
-    with tf.Session() as sess:
-        env = gym.make(ENV_NAME)
-        policies = {'random': RandomPolicy, 'contrarian': ContrarianPolicy, 'policy_gradient': PolicyGradient}
-        policy = policies['policy_gradient'](sess)
-        env = gym.wrappers.Monitor(env, VIDEO_DIR, force=True)
-        train(sess, env, policy)
+    for learning_rate in [1E-4, 1e-3, 1e-2]:
+        for use_two_fc in [False]:
+            for n_neurons in [20,50,100]:
+                for use_dropout in [True, False]:
+                    # Construct a hyperparameter string for each one (example: "lr_1E-3,fc=2,conv=2)
+                    hparam = make_hparam_string(learning_rate, n_neurons, use_two_fc, use_dropout)
+                    print('Starting run for %s' % hparam)
+                    train(learning_rate, n_neurons, use_two_fc, use_dropout, hparam)
         # total_times, total_rewards, reward_mses = train(sess, env, policy)
         # plot_metadata(total_times, total_rewards, reward_mses)
 
