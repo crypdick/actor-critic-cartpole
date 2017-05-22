@@ -136,7 +136,8 @@ class ActorNetwork(object):
                                             name='hidden1')
         actor_net = tflearn.dropout(actor_net, 0.5, name='actor_dropout')
         actor_net = tflearn.fully_connected(actor_net, ACTION_PROB_DIMS, activation='softmax',
-                                            weights_init='truncated_normal', name='output_action_probabilities')
+                                            weights_init='truncated_normal', bias=True, bias_init='zeros',
+                                            name='output_action_probabilities')
 
         return input_states, actor_net
 
@@ -192,7 +193,9 @@ class CriticNetwork(object):
         # linear layer connected to 1 output representing Q(s,a)
         # TODO: does this have to be only one unit?
         r_net = tflearn.dropout(r_net, 0.5, name='critic_dropout')
-        r_net = tflearn.fully_connected(r_net, 1, weights_init='truncated_normal', name='output_rewards')
+        r_net = tflearn.fully_connected(r_net, 1, weights_init='truncated_normal',
+                                        bias=True, bias_init='zeros',
+                                        name='output_rewards')
 
         return input_states, input_actions, r_net
 
