@@ -10,11 +10,11 @@ os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"  # see issue #152
 os.environ["CUDA_VISIBLE_DEVICES"] = "1"  # use correct GPU
 
 ENV_NAME = 'CartPole-v0'
-RENDER_ENV = False
+RENDER_ENV = True
 SAVE_METADATA = True
 SAVE_VIDS = True
 VIDEO_DIR = './results/videos'
-TENSORBOARD_RESULTS_DIR = './results/tensorboard/1'
+TENSORBOARD_RESULTS_DIR = './results/tensorboard/overnight'
 
 STATE_DIM = 4
 ACTION_DIM = 1
@@ -22,7 +22,7 @@ ACTION_PROB_DIMS = 2
 ACTION_BOUND = 1  # 0 to 1
 ACTION_SPACE = [0, 1]
 
-N_EPISODES = 1#50000
+N_EPISODES = 10#50000
 MAX_EP_STEPS = 200  # from CartPole env
 ACTOR_LEARNING_RATE = 0.0001
 CRITIC_LEARNING_RATE = 0.0001
@@ -189,6 +189,8 @@ class CriticNetwork(object):
 
                 # Add the action tensor in the 2nd hidden layer
                 # these two lines are hacks just to get weights and biases
+                # TODO: should I change this architecture? The graph on tensorboard looks like a mess
+
                 t1 = tflearn.fully_connected(r_net, self.n_units, name='temp_hidden1')
                 t2 = tflearn.fully_connected(input_actions, self.n_units, name='temp_hidden2')
 
@@ -359,7 +361,7 @@ def build_summaries():
     episode_avg_reward = tf.Variable(0.)
     tf.summary.scalar("Average Reward per action", episode_avg_reward)
     reward_mses = tf.Variable(0.)
-    tf.summary.scalar("Total discounted reward", reward_mses)
+    tf.summary.scalar("Reward MSE", reward_mses)
 
     summary_vars = [episode_time, episode_sum_discounted_reward, episode_avg_reward, reward_mses]
     summary_ops = tf.summary.merge_all()
