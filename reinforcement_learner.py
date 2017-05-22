@@ -32,8 +32,6 @@ DISCOUNT_FACTOR = 0.7  # aka gamma
 # https://www.youtube.com/watch?v=oPGVsoBonLM
 # policy gradient goal: maximize E[Reward|policy*]
 
-# start: randomly generate weights
-
 ''' gradient estimator:
 for generic E[f(x)] where x is sampled ~ prob dist p(x|theta), we want to compute the gradient wrt parameter theta:
 grad_wrt_x(E_x(f(x)))
@@ -86,8 +84,6 @@ class ContrarianPolicy(Policy):
 
 
 class PolicyGradient(Policy):
-    """AKA policy gradient"""
-
     def __init__(self, sess):
         super().__init__(sess)
 
@@ -131,20 +127,10 @@ class ActorNetwork(object):
         self.action_taken = tf.placeholder("float", [None, ACTION_PROB_DIMS])
 
         log_action_probability = tf.reduce_sum(self.action_taken*tf.log(self.action_predictor))
-        self.loss = -log_action_probability * self.input_rewards
-        self.optim = tf.train.AdamOptimizer(ACTOR_LEARNING_RATE).minimize(self.loss)
+        self.loss = -log_action_probability * self.input_rewards  #  could also switch to l2 loss
+        tf
 
-        # self.gradient_wrt_actions, self.actor_optimizer = self.mk_actor_optimizer()
-        # to calculate cross entropy on probabilities, need to take log to get logits
-        # self.loss, self.discounted_rewards, self.step_optimizer = self.mk_trainer()
-        # Define loss and optimizer
-    #     self.actions_taken = tf.placeholder(tf.float32, [None, ACTION_PROB_DIMS])
-    #     self.loss = tf.nn.l2_loss(self.actions_taken - self.action_predictor)
-    #     # self.loss = -tf.reduce_sum(*tf.log(self.action_predictor), 1)
-    #     self.train_step = tf.train.GradientDescentyOptimizer(0.5).minimize(self.loss)
-    # # def calculate_loss(self, actions_taken):
-    # #     loss = -tf.reduce_sum(actions_taken*tf.log(self.action_predictor), 1)
-    # #     return loss
+        self.optimizer = tf.train.AdamOptimizer(ACTOR_LEARNING_RATE).minimize(self.loss)
 
     def mk_action_predictor_net(self):
         """neural network that outputs probabilities of each action"""
@@ -161,14 +147,7 @@ class ActorNetwork(object):
             actor_net = tflearn.fully_connected(actor_net, ACTION_PROB_DIMS, activation='softmax',
                                                 weights_init='truncated_normal', bias=True, bias_init='zeros',
                                                 name='output_action_probabilities')
-            # print(type(actor_net))
-            # activations = tflearn.activations.softmax(actor_net.b)
-
-            # tflearn.summaries.add_activations_summary([actor_net])
-            # tflearn.summaries.get_summary('histogram', 'final_layer_biases', value=actor_net.b)
             tflearn.summaries.add_trainable_vars_summary([actor_net.W, actor_net.b], name_prefix='final_layer')
-            # tflearn.summaries.add_activations_summary(actor_net, name_prefix='final_layer')
-            # tflearn.summaries.add_trainable_vars_summary([actor_net.b], name_prefix='final_layer', name_suffix='biases')
 
             return input_states, actor_net
 
@@ -201,14 +180,10 @@ class ActorNetwork(object):
 
     def update_policy(self, input_states, action_probability_timeline, observed_rewards):
         """when episode concludes, lets update our actors and critics"""
-        # loss = tf.nn.l2_loss(actions_taken - action_probability_timeline)  # this gradient encourages the actions taken
-        _, error_value = self.sess.run([self.optim, self.loss],
+        _, error_value = self.sess.run([self.optimizer, self.loss],
                                        feed_dict={self.input_states: input_states,
                                                   self.action_taken: action_probability_timeline,
                                                   self.input_rewards: observed_rewards})
-        # self.sess.run(self.train_step,
-        #           {self.input_states: input_states, #self.action_probabilities: action_probability_timeline,
-        #            self.actions_taken: actions_taken})  # parameter update
 
 
 # class CriticNetwork(object):
@@ -298,10 +273,6 @@ def train(sess, env, policy):
     sess.run(tf.global_variables_initializer())
     writer = tf.summary.FileWriter(TENSORBOARD_RESULTS_DIR, sess.graph)
     summary_ops, summary_vars = build_summaries()
-    #
-    # total_times = []
-    # total_rewards = []
-    # reward_mses = []
 
     for episode_i in range(N_EPISODES):
         # print("starting ep", episode)
@@ -325,6 +296,7 @@ def train(sess, env, policy):
             rewards.append(reward)
             # print("future state ", np.shape(future_state))
 
+            #  custom reward function to manually promote low thetas and x around 0
             # x, theta = future_state
             # low_theta_bonus = -100. * (theta ** 2.) + 1.  # reward of 1 at 0 rads, reward of 0 at +- 0.1 rad/6 deg)
             # # center_pos_bonus = -1 * abs(0.5 * x) + 1  # bonus of 1.0 at x=0, goes down to 0 as x approaches edge
@@ -346,7 +318,7 @@ def train(sess, env, policy):
 
         # make our env observations into correct tensor shapes
         tensor_lengths = len(actions)
-        actions = np.reshape(actions, (tensor_lengths, 1))
+        # actions = np.reshape(actions, (tensor_lengths, 1))
         action_probability_timeline = np.reshape(action_probability_timeline, (tensor_lengths, ACTION_PROB_DIMS))
         discounted_rewards = np.reshape(discounted_rewards, (tensor_lengths, 1))
 
