@@ -13,7 +13,7 @@ ENV_NAME = 'CartPole-v0'
 RENDER_ENV = False
 SAVE_VIDS = True
 VIDEO_DIR = './results/videos'
-TENSORBOARD_RESULTS_DIR = './results/tensorboard/testing'
+TENSORBOARD_RESULTS_DIR = './results/tensorboard/1'
 
 STATE_DIM = 4
 ACTION_DIM = 1
@@ -123,14 +123,16 @@ class ActorNetwork(object):
         self.trainable_net_params = tf.trainable_variables()
         self.n_trainable_params = len(self.trainable_net_params)
 
-        self.input_rewards = tf.placeholder("float", [None, 1])
-        self.action_taken = tf.placeholder("float", [None, ACTION_PROB_DIMS])
+        with tf.name_scope('optimizer'):
 
-        log_action_probability = tf.reduce_sum(self.action_taken*tf.log(self.action_predictor))
-        self.loss = -log_action_probability * self.input_rewards  #  could also switch to l2 loss
-        tf
+            self.input_rewards = tf.placeholder("float", [None, 1])
+            self.action_taken = tf.placeholder("float", [None, ACTION_PROB_DIMS])
+            # self.loss =  tf.placeholder("float", [None, 1])
+            # tf.summary.scalar('cross_entropy', self.loss)  # fixme throws InvalidArgumentError
 
-        self.optimizer = tf.train.AdamOptimizer(ACTOR_LEARNING_RATE).minimize(self.loss)
+            log_action_probability = tf.reduce_sum(self.action_taken*tf.log(self.action_predictor))
+            self.loss = -log_action_probability * self.input_rewards  # could also switch to l2 loss
+            self.optimizer = tf.train.AdamOptimizer(ACTOR_LEARNING_RATE).minimize(self.loss)
 
     def mk_action_predictor_net(self):
         """neural network that outputs probabilities of each action"""
