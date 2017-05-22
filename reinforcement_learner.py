@@ -127,17 +127,24 @@ class ActorNetwork(object):
         self.trainable_net_params = tf.trainable_variables()
         self.n_trainable_params = len(self.trainable_net_params)
 
+        self.input_rewards = tf.placeholder("float", [None, 1])
+        self.action_taken = tf.placeholder("float", [None, ACTION_PROB_DIMS])
+
+        log_action_probability = tf.reduce_sum(self.action_taken*tf.log(self.action_predictor))
+        self.loss = -log_action_probability * self.input_rewards
+        self.optim = tf.train.AdamOptimizer(ACTOR_LEARNING_RATE).minimize(self.loss)
+
         # self.gradient_wrt_actions, self.actor_optimizer = self.mk_actor_optimizer()
         # to calculate cross entropy on probabilities, need to take log to get logits
         # self.loss, self.discounted_rewards, self.step_optimizer = self.mk_trainer()
         # Define loss and optimizer
-        self.actions_taken = tf.placeholder(tf.float32, [None, ACTION_PROB_DIMS])
-        self.loss = tf.nn.l2_loss(self.actions_taken - self.action_predictor)
-        # self.loss = -tf.reduce_sum(*tf.log(self.action_predictor), 1)
-        self.train_step = tf.train.GradientDescentOptimizer(0.5).minimize(self.loss)
-    # def calculate_loss(self, actions_taken):
-    #     loss = -tf.reduce_sum(actions_taken*tf.log(self.action_predictor), 1)
-    #     return loss
+    #     self.actions_taken = tf.placeholder(tf.float32, [None, ACTION_PROB_DIMS])
+    #     self.loss = tf.nn.l2_loss(self.actions_taken - self.action_predictor)
+    #     # self.loss = -tf.reduce_sum(*tf.log(self.action_predictor), 1)
+    #     self.train_step = tf.train.GradientDescentyOptimizer(0.5).minimize(self.loss)
+    # # def calculate_loss(self, actions_taken):
+    # #     loss = -tf.reduce_sum(actions_taken*tf.log(self.action_predictor), 1)
+    # #     return loss
 
     def mk_action_predictor_net(self):
         """neural network that outputs probabilities of each action"""
@@ -192,12 +199,16 @@ class ActorNetwork(object):
     #     optimizer_step = optimizer.apply_gradients(action_gradients)
     #     return loss, discounted_rewards, optimizer_step
 
-    def update_policy(self, input_states, actions_taken): #, action_probability_timeline, observed_rewards):
+    def update_policy(self, input_states, action_probability_timeline, observed_rewards):
         """when episode concludes, lets update our actors and critics"""
         # loss = tf.nn.l2_loss(actions_taken - action_probability_timeline)  # this gradient encourages the actions taken
-        self.sess.run(self.train_step,
-                  {self.input_states: input_states, #self.action_probabilities: action_probability_timeline,
-                   self.actions_taken: actions_taken})  # parameter update
+        _, error_value = self.sess.run([self.optim, self.loss],
+                                       feed_dict={self.input_states: input_states,
+                                                  self.action_taken: action_probability_timeline,
+                                                  self.input_rewards: observed_rewards})
+        # self.sess.run(self.train_step,
+        #           {self.input_states: input_states, #self.action_probabilities: action_probability_timeline,
+        #            self.actions_taken: actions_taken})  # parameter update
 
 
 # class CriticNetwork(object):
@@ -340,7 +351,7 @@ def train(sess, env, policy):
         discounted_rewards = np.reshape(discounted_rewards, (tensor_lengths, 1))
 
         # update policy
-        policy.actor.update_policy(states, action_probability_timeline)  # fixme this should use rewards
+        policy.actor.update_policy(states, action_probability_timeline, discounted_rewards)
         # total_rewards.append(discounted_rewards.sum())
 
         # let's look at how our reward belief network is doing
