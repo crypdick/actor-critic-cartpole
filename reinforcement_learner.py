@@ -10,14 +10,11 @@ os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"  # see issue #152
 os.environ["CUDA_VISIBLE_DEVICES"] = "1"  # use correct GPU
 
 ENV_NAME = 'CartPole-v0'
-RENDER_ENV = True
+RENDER_ENV = False
 SAVE_METADATA = True
 SAVE_VIDS = True
-VID_DIR = './log/videos/'
-MONITOR_DIR = './results/gym_ddpg'
-TENSORBOARD_RESULTS_DIR = './results/tf_results'
-# Directory for storing gym results
-MONITOR_DIR = './results/gym_ddpg'
+VIDEO_DIR = './results/videos'
+TENSORBOARD_RESULTS_DIR = './results/tensorboard'
 
 STATE_DIM = 4
 ACTION_DIM = 1
@@ -25,13 +22,13 @@ ACTION_PROB_DIMS = 2
 ACTION_BOUND = 1  # 0 to 1
 ACTION_SPACE = [0, 1]
 
-N_EPISODES = 3000
+N_EPISODES = 50000
 MAX_EP_STEPS = 200  # from CartPole env
-# Base learning rate for the Actor network
-ACTOR_LEARNING_RATE = 0.001  # 0.0001
-CRITIC_LEARNING_RATE = 0.001
-# Discount factor
-DISCOUNT_FACTOR = 0.9  # aka gamma
+ACTOR_LEARNING_RATE = 0.0001  # 0.0001
+CRITIC_LEARNING_RATE = 0.0001
+# discount factor
+# the relevant window into the future is about 10 timesteps. (1 *0.7)^10 shrinks to 3% after 10 timesteps.
+DISCOUNT_FACTOR = 0.7  # aka gamma
 
 # https://www.youtube.com/watch?v=oPGVsoBonLM
 # policy gradient goal: maximize E[Reward|policy*]
@@ -137,6 +134,7 @@ class ActorNetwork(object):
         actor_net = tflearn.fully_connected(input_states, self.n_units, activation='relu',
                                             weights_init='truncated_normal',
                                             name='hidden1')
+        actor_net = tflearn.dropout(actor_net, 0.5, name='actor_dropout')
         actor_net = tflearn.fully_connected(actor_net, ACTION_PROB_DIMS, activation='softmax',
                                             weights_init='truncated_normal', name='output_action_probabilities')
 
@@ -193,6 +191,7 @@ class CriticNetwork(object):
 
         # linear layer connected to 1 output representing Q(s,a)
         # TODO: does this have to be only one unit?
+        r_net = tflearn.dropout(r_net, 0.5, name='critic_dropout')
         r_net = tflearn.fully_connected(r_net, 1, weights_init='truncated_normal', name='output_rewards')
 
         return input_states, input_actions, r_net
@@ -238,6 +237,7 @@ def train(sess, env, policy):
 
     total_times = []
     total_rewards = []
+    reward_mses = []
 
     for episode in range(N_EPISODES):
         # print("starting ep", episode)
@@ -286,21 +286,25 @@ def train(sess, env, policy):
 
         # update policy
         policy.update_policy(states, actions, discounted_rewards)
-        
+
+        total_rewards.append(discounted_rewards.sum())
+
         # let's look at how our reward belief network is doing
         reward_mse = np.mean((discounted_rewards - policy.predict_rewards(states, actions))**2)
+        reward_mses.append(reward_mse)
 
-        print("episode {} | total reward {} | avg reward {} | time alive {} | reward loss {}".format(
-            episode,
-            discounted_rewards.sum(),
-            discounted_rewards.mean(),
-            total_time,
-            reward_mse
-        ))
+        # print("episode {} | total reward {} | avg reward {} | time alive {} | reward loss {}".format(
+        #     episode,
+        #     discounted_rewards.sum(),
+        #     discounted_rewards.mean(),
+        #     total_time,
+        #     reward_mse
+        # ))
 
         # TODO save these
 
-    return total_times, discounted_rewards.sum()
+    return total_times, total_rewards, reward_mses
+
 
 
 def calc_discounted_rewards(rewards, total_time):
@@ -336,16 +340,18 @@ def build_summaries():
     return summary_ops, summary_vars
 
 
-def plot_metadata(total_times, total_rewards):
-    f, axarr = plt.subplots(2, sharex=True) #sharex [True] must be one of ['all', 'row', 'col', 'none']
+def plot_metadata(total_times, total_rewards, reward_mses):
+    f, axarr = plt.subplots(3, sharex=True) #sharex [True] must be one of ['all', 'row', 'col', 'none']
     x = np.arange(N_EPISODES)
     axarr[0].plot(x, total_times)
     axarr[0].set_title('Total Times')
     axarr[0].set_ylabel("Time")
-    axarr[1].scatter(x, total_rewards)
+    axarr[1].plot(x, total_rewards)
     axarr[1].set_title('Total Rewards')
     axarr[1].set_ylabel("Rewards")
-    axarr[1].set_xlabel("Episode Number")
+    axarr[2].plot(x, reward_mses)
+    axarr[2].set_ylabel("Critic Weward MSE")
+    axarr[2].set_xlabel("Episode Number")
 
     plt.show()
 
@@ -356,9 +362,9 @@ def main(_):
         env = gym.make(ENV_NAME)
         policies = {'random': RandomPolicy, 'contrarian': ContrarianPolicy, 'policy_gradient': PolicyGradient}
         policy = policies['policy_gradient'](sess)
-        env = gym.wrappers.Monitor(env, MONITOR_DIR, force=True)
-        total_times, total_rewards = train(sess, env, policy)
-        plot_metadata(total_times, total_rewards)
+        env = gym.wrappers.Monitor(env, VIDEO_DIR, force=True)
+        total_times, total_rewards, reward_mses = train(sess, env, policy)
+        plot_metadata(total_times, total_rewards, reward_mses)
 
         # TODO save progress to resume learning weights
 
