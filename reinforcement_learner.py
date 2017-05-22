@@ -13,7 +13,7 @@ ENV_NAME = 'CartPole-v0'
 RENDER_ENV = False
 SAVE_VIDS = True
 VIDEO_DIR = './results/videos'
-TENSORBOARD_RESULTS_DIR = './results/tensorboard/overnight'
+TENSORBOARD_RESULTS_DIR = './results/tensorboard/testing'
 
 STATE_DIM = 4
 ACTION_DIM = 1
@@ -21,7 +21,7 @@ ACTION_PROB_DIMS = 2
 ACTION_BOUND = 1  # 0 to 1
 ACTION_SPACE = [0, 1]
 
-N_EPISODES = 200000
+N_EPISODES = 10
 MAX_EP_STEPS = 200  # from CartPole env
 ACTOR_LEARNING_RATE = 0.0001
 CRITIC_LEARNING_RATE = 0.0001
@@ -97,8 +97,9 @@ class PolicyGradient(Policy):
     def calc_action_probabilities(self, observed_states):
         action_probabilities = self.sess.run(self.actor.action_predictor,
                                              feed_dict={self.actor.input_states: observed_states})
+        # fixme activations aren't in tensorboard
+        tflearn.summaries.add_activations_summary([self.actor.action_predictor], name_prefix='actor_predictor_NET')
         action_probabilities = action_probabilities[0]  # reduce depth by 1
-        # print("tf action probs", action_probabilities)
         return action_probabilities
 
     def predict_rewards(self, observed_states, observed_actions):
@@ -134,10 +135,22 @@ class ActorNetwork(object):
             actor_net = tflearn.fully_connected(input_states, self.n_units, activation='relu',
                                                 weights_init='truncated_normal',
                                                 name='hidden1')
+            tflearn.summaries.add_trainable_vars_summary([actor_net.W, actor_net.b], name_prefix='hidden1')
             actor_net = tflearn.dropout(actor_net, 0.5, name='actor_dropout')
+            # actor_net = tflearn.fully_connected(actor_net, ACTION_PROB_DIMS,
+            #                                     weights_init='truncated_normal', bias=True, bias_init='zeros',
+            #                                     name='output_action_probabilities')
             actor_net = tflearn.fully_connected(actor_net, ACTION_PROB_DIMS, activation='softmax',
                                                 weights_init='truncated_normal', bias=True, bias_init='zeros',
                                                 name='output_action_probabilities')
+            # print(type(actor_net))
+            # activations = tflearn.activations.softmax(actor_net.b)
+
+            # tflearn.summaries.add_activations_summary([actor_net])
+            # tflearn.summaries.get_summary('histogram', 'final_layer_biases', value=actor_net.b)
+            tflearn.summaries.add_trainable_vars_summary([actor_net.W, actor_net.b], name_prefix='final_layer')
+            # tflearn.summaries.add_activations_summary(actor_net, name_prefix='final_layer')
+            # tflearn.summaries.add_trainable_vars_summary([actor_net.b], name_prefix='final_layer', name_suffix='biases')
 
             return input_states, actor_net
 
@@ -182,6 +195,7 @@ class CriticNetwork(object):
             input_states = tflearn.input_data(shape=[None, STATE_DIM], name='input_states')
             input_actions = tflearn.input_data(shape=[None, ACTION_DIM], name='input_actions')
             r_net = tflearn.fully_connected(input_states, self.n_units, activation='relu', name='hidden1')
+            tflearn.summaries.add_trainable_vars_summary([r_net.W], name_prefix='hidden1')
 
             # Add the action tensor in the 2nd hidden layer
             # these two lines are hacks just to get weights and biases
@@ -192,6 +206,7 @@ class CriticNetwork(object):
             r_net = tflearn.activation(tf.matmul(r_net, t1.W) +
                                        tf.matmul(input_actions, t2.W) + t2.b, activation='relu',
                                        name='combine_state_actions')
+            # tflearn.summaries.add_activations_summary([r_net], name_prefix='combine_state_actions')
 
             # linear layer connected to 1 output representing Q(s,a)
             # TODO: does this have to be only one unit?
@@ -199,6 +214,7 @@ class CriticNetwork(object):
             r_net = tflearn.fully_connected(r_net, 1, weights_init='truncated_normal',
                                             bias=True, bias_init='zeros',
                                             name='output_rewards')
+            tflearn.summaries.add_trainable_vars_summary([r_net.W, r_net.b], name_prefix='output_rewards')
 
             return input_states, input_actions, r_net
 
@@ -224,6 +240,8 @@ class CriticNetwork(object):
         with tf.name_scope('action_gradient_calculator'):
             # Get the gradient of the net w.r.t. the action
             action_grad_calculator = tf.gradients(self.reward_predictor, self.input_actions)
+            # print(type(action_grad_calculator),np.shape(action_grad_calculator), action_grad_calculator)
+            # tflearn.helpers.summarizer.summarize_gradients([action_grad_calculator])
             return action_grad_calculator
 
     def calc_action_gradient(self, states, actions):
