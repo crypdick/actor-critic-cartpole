@@ -11,7 +11,7 @@ os.environ["CUDA_VISIBLE_DEVICES"] = "1"  # use correct GPU
 ENV_NAME = 'CartPole-v0'
 RENDER_ENV = False
 VIDEO_DIR = './results/videos/'
-`TENSORBOARD_RESULTS_DIR = './results/tensorboard/param_sweep6/'
+TENSORBOARD_RESULTS_DIR = './results/tensorboard/param_sweep6/'
 
 STATE_DIM = 4
 ACTION_DIM = 1
@@ -100,12 +100,10 @@ class PolicyGradient(Policy):
         # self.critic = CriticNetwork(self.sess, self.actor.n_trainable_params)
 
     def calc_action_probabilities(self, observed_states):
-        action_probabilities = self.sess.run(self.actor.action_predictor,
-                                             feed_dict={self.actor.input_states: observed_states})
-        # fixme activations aren't in tensorboard
-        # tflearn.summaries.add_activations_summary([self.actor.action_predictor], name_prefix='actor_predictor_NET')
+        action_probabilities, summaries = self.sess.run([self.actor.action_predictor, self.actor.summary_op1],
+                                                        feed_dict={self.actor.input_states: observed_states})
         action_probabilities = action_probabilities[0]  # reduce depth by 1
-        return action_probabilities
+        return action_probabilities, summaries
 
     # def predict_rewards(self, observed_states, observed_actions):
     #     """in case we want to peek at our reward predictions"""
@@ -132,7 +130,7 @@ class ActorNetwork(object):
         self.n_units = n_neurons
         self.use_two_fc = use_two_fc
         self.use_dropout = use_dropout
-        self.input_states, self.action_predictor = self.mk_action_predictor_net()
+        self.input_states, self.action_predictor, self.summary_op1 = self.mk_action_predictor_net()
         self.trainable_net_params = tf.trainable_variables()
         self.n_trainable_params = len(self.trainable_net_params)
 
@@ -151,18 +149,20 @@ class ActorNetwork(object):
             actor_net = tflearn.fully_connected(input_states, self.n_units,
                                                 weights_init='truncated_normal',
                                                 name='fc1')
-            # tf.summary.histogram('fc1_DUB', actor_net.W)
-            # tflearn.summaries.add_trainable_vars_summary([actor_net.W, actor_net.b], name_prefix='fc1')
-            if self.use_two_fc:
-                actor_net = tflearn.fully_connected(actor_net, name='fc2')
-            if self.use_dropout:
-                actor_net = tflearn.dropout(actor_net, 0.5, name='actor_dropout')
+            # # tf.summary.histogram('fc1_DUB', actor_net.W)
+            tflearn.summaries.add_trainable_vars_summary([actor_net.W, actor_net.b], name_prefix='fc1')
+            # if self.use_two_fc:
+            #     actor_net = tflearn.fully_connected(actor_net, name='fc2')
+            # if self.use_dropout:
+            #     actor_net = tflearn.dropout(actor_net, 0.5, name='actor_dropout')
             actor_net = tflearn.fully_connected(actor_net, ACTION_PROB_DIMS, activation='softmax',
                                                 weights_init='truncated_normal', bias=True, bias_init='truncated_normal',
                                                 name='fc_output_action_probabilities')
-            # tflearn.summaries.add_trainable_vars_summary([actor_net.W, actor_net.b], name_prefix='final_layer')
+            tflearn.summaries.add_trainable_vars_summary([actor_net.W, actor_net.b], name_prefix='final_layer')
+            tflearn.summaries.monitor_activation(actor_net)
+            summary_op = tf.summary.merge_all()
 
-            return input_states, actor_net
+            return input_states, actor_net, summary_op
 
     # def mk_actor_optimizer(self):
     #     """optimizer for actor network"""
@@ -302,6 +302,7 @@ def train(learning_rate, n_neurons, use_two_fc, use_dropout, hparam):
             # print("starting ep", episode)
 
             states, actions, action_probability_timeline, rewards = [], [], [], []
+            summaries = []
 
             current_state = env.reset()
             states.append(current_state)
@@ -310,7 +311,8 @@ def train(learning_rate, n_neurons, use_two_fc, use_dropout, hparam):
             for ts in range(MAX_EP_STEPS):
                 if RENDER_ENV:
                     env.render()
-                action_probabilities = policy.calc_action_probabilities(np.reshape(current_state, (1, STATE_DIM)))
+                action_probabilities, summary = policy.calc_action_probabilities(np.reshape(current_state, (1, STATE_DIM)))
+                summaries.append(summary)
                 action_probability_timeline.append(action_probabilities)
                 # print(action_probabilities)
                 action = policy.choose_action(action_probabilities)
@@ -363,8 +365,9 @@ def train(learning_rate, n_neurons, use_two_fc, use_dropout, hparam):
                 summary_vars[2]: discounted_rewards.mean(),
                 summary_vars[3]: losses
             })
-            #
-            writer.add_summary(summary_str, episode_i)
+            summaries.append(summary_str)
+            for s in summaries:
+                writer.add_summary(s, episode_i)
             writer.flush()
 
             # print("episode {} | total reward {} | avg reward {} | time alive {}".format(
