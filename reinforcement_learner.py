@@ -11,8 +11,8 @@ os.environ["CUDA_VISIBLE_DEVICES"] = "1"  # use correct GPU
 ENV_NAME = 'CartPole-v0'
 RENDER_ENV = False
 SAVE_VIDS = True
-VIDEO_DIR = './results/videos'
-TENSORBOARD_RESULTS_DIR = './results/tensorboard/param sweep2/'
+VIDEO_DIR = './results/videos/'
+TENSORBOARD_RESULTS_DIR = './results/tensorboard/param_sweep4/'
 
 STATE_DIM = 4
 ACTION_DIM = 1
@@ -26,7 +26,7 @@ MAX_EP_STEPS = 200  # from CartPole env
 # CRITIC_LEARNING_RATE = 0.0001
 # discount factor
 # the relevant window into the future is about 10 timesteps. (1 *0.7)^10 shrinks to 3% after 10 timesteps.
-DISCOUNT_FACTOR = 0.9  # aka gamma
+DISCOUNT_FACTOR = 0.95  # aka gamma
 
 # https://www.youtube.com/watch?v=oPGVsoBonLM
 # policy gradient goal: maximize E[Reward|policy*]
@@ -293,7 +293,7 @@ def train(learning_rate, n_neurons, use_two_fc, use_dropout, hparam):
         sess.run(tf.global_variables_initializer())
 
         env = gym.make(ENV_NAME)
-        env = gym.wrappers.Monitor(env, VIDEO_DIR, force=True)
+        env = gym.wrappers.Monitor(env, VIDEO_DIR+hparam, force=True)
 
         summary_ops, summary_vars = build_summaries()
 
@@ -363,12 +363,12 @@ def train(learning_rate, n_neurons, use_two_fc, use_dropout, hparam):
             writer.add_summary(summary_str, episode_i)
             writer.flush()
 
-            print("episode {} | total reward {} | avg reward {} | time alive {}".format(
-                episode_i,
-                discounted_rewards.sum(),
-                discounted_rewards.mean(),
-                episode_length
-            ))
+            # print("episode {} | total reward {} | avg reward {} | time alive {}".format(
+            #     episode_i,
+            #     discounted_rewards.sum(),
+            #     discounted_rewards.mean(),
+            #     episode_length
+            # ))
 
             # TODO save these
 
@@ -387,7 +387,7 @@ def calc_discounted_rewards(rewards, total_time):
     # otherwise, early rewards become astronomical as the running reward gets added to each previous ts
     # scaled rewards are much smaller, which makes it more stable for the neural network to approximate.
     # since we subtract the mean, we also see that the lat
-    # discounted_rewards -= discounted_rewards.mean()
+    discounted_rewards -= discounted_rewards.mean()
     # decided to not subtract mean because the second half of the episode will never have a positive score.
     # that isn't necessarily good because sometimes we simply run out of time (max episode length is only 200).
     # we don't want to always be penalizing the end of an episode
@@ -429,8 +429,8 @@ def build_summaries():
 def main(_):
     for learning_rate in [1E-4, 1e-3, 1e-2]:
         for use_two_fc in [False]:
-            for n_neurons in [20,50,100]:
-                for use_dropout in [True, False]:
+            for n_neurons in [20,50,80]:
+                for use_dropout in [False]:
                     # Construct a hyperparameter string for each one (example: "lr_1E-3,fc=2,conv=2)
                     hparam = make_hparam_string(learning_rate, n_neurons, use_two_fc, use_dropout)
                     print('Starting run for %s' % hparam)
