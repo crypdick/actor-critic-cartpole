@@ -10,9 +10,8 @@ os.environ["CUDA_VISIBLE_DEVICES"] = "1"  # use correct GPU
 
 ENV_NAME = 'CartPole-v0'
 RENDER_ENV = False
-SAVE_VIDS = True
 VIDEO_DIR = './results/videos/'
-TENSORBOARD_RESULTS_DIR = './results/tensorboard/param_sweep4/'
+TENSORBOARD_RESULTS_DIR = './results/tensorboard/param_sweep5/'
 
 STATE_DIM = 4
 ACTION_DIM = 1
@@ -62,6 +61,7 @@ class Policy(object):
 
 
 class RandomPolicy(Policy):
+    """A policy to benchmark the policy gradient against. takes a random action at every timestep."""
     def __init__(self, *args, sess=None):
         super().__init__(sess)
 
@@ -76,6 +76,8 @@ class RandomPolicy(Policy):
 
 
 class ContrarianPolicy(Policy):
+    """A policy to benchmark the policy gradient against. whatever direction the pole is tilting, it will try to push it
+     back to upright"""
     def __init__(self, *args, sess=None):
         super().__init__(sess)
 
@@ -91,6 +93,7 @@ class ContrarianPolicy(Policy):
 
 
 class PolicyGradient(Policy):
+    """policy gradient. actor and critic are children."""
     def __init__(self, *args, sess=None):
         super().__init__(sess)
 
@@ -123,6 +126,7 @@ class PolicyGradient(Policy):
 
 
 class ActorNetwork(object):
+    """picks our actions at a given state"""
     def __init__(self, sess, learning_rate, n_neurons, use_two_fc, use_dropout):
         self.sess = sess
         self.learning_rate = learning_rate
@@ -202,6 +206,7 @@ class ActorNetwork(object):
 
 
 # class CriticNetwork(object):
+#     """predicts the rewards for a a given (state,action) sequence"""
 #     def __init__(self, sess, n_actor_params):
 #         self.sess = sess
 #         self.n_units = 200
@@ -285,6 +290,7 @@ class ActorNetwork(object):
 
 
 def train(learning_rate, n_neurons, use_two_fc, use_dropout, hparam):
+    """runs all the episodes"""
     tf.reset_default_graph()
     with tf.Session() as sess:
         writer = tf.summary.FileWriter(TENSORBOARD_RESULTS_DIR + hparam, sess.graph)
@@ -397,6 +403,7 @@ def calc_discounted_rewards(rewards, total_time):
 
 
 def build_summaries():
+    """for doing a post-mortem in Tensorboard"""
     episode_time = tf.Variable(0.)
     a = tf.summary.scalar("Episode length", episode_time)
     episode_sum_discounted_reward = tf.Variable(0.)
@@ -427,10 +434,11 @@ def build_summaries():
 
 
 def main(_):
-    for learning_rate in [1E-4, 1e-3, 1e-2]:
+    """parameter sweep to find the best model"""
+    for learning_rate in [1E-6, 1e-5]:
         for use_two_fc in [False]:
             for n_neurons in [20,50,80]:
-                for use_dropout in [False]:
+                for use_dropout in [False]:  # dropout always made things worse
                     # Construct a hyperparameter string for each one (example: "lr_1E-3,fc=2,conv=2)
                     hparam = make_hparam_string(learning_rate, n_neurons, use_two_fc, use_dropout)
                     print('Starting run for %s' % hparam)
