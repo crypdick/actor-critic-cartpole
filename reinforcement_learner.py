@@ -11,7 +11,7 @@ os.environ["CUDA_VISIBLE_DEVICES"] = "1"  # use correct GPU
 ENV_NAME = 'CartPole-v0'
 RENDER_ENV = False
 VIDEO_DIR = './results/videos/'
-TENSORBOARD_RESULTS_DIR = './results/tensorboard/param_sweep5/'
+`TENSORBOARD_RESULTS_DIR = './results/tensorboard/param_sweep6/'
 
 STATE_DIM = 4
 ACTION_DIM = 1
@@ -139,12 +139,9 @@ class ActorNetwork(object):
         with tf.name_scope('optimizer'):
             self.input_rewards = tf.placeholder("float", [None, 1])
             self.action_taken = tf.placeholder("float", [None, ACTION_PROB_DIMS])
-            # self.loss =  tf.placeholder("float", [None, 1])
-            # tf.summary.scalar('cross_entropy', self.loss)  # fixme throws InvalidArgumentError
 
-            log_action_probability = tf.reduce_sum(self.action_taken*tf.log(self.action_predictor))
-            self.loss = -log_action_probability * self.input_rewards  # could also switch to l2 loss
-            tf.summary.scalar('loss', self.loss)
+            cross_entropy = -1*tf.reduce_sum(self.action_taken*tf.log(self.action_predictor))
+            self.loss = -cross_entropy * self.input_rewards  # could also switch to l2 loss
             self.optimizer = tf.train.AdamOptimizer(self.learning_rate).minimize(self.loss)
 
     def mk_action_predictor_net(self):
@@ -196,10 +193,11 @@ class ActorNetwork(object):
 
     def update_policy(self, input_states, action_probability_timeline, observed_rewards):
         """when episode concludes, lets update our actors and critics"""
-        _, error_value = self.sess.run([self.optimizer, self.loss],
+        _, losses = self.sess.run([self.optimizer, self.loss],
                                        feed_dict={self.input_states: input_states,
                                                   self.action_taken: action_probability_timeline,
                                                   self.input_rewards: observed_rewards})
+        return losses
 
 
 # class CriticNetwork(object):
@@ -298,7 +296,7 @@ def train(learning_rate, n_neurons, use_two_fc, use_dropout, hparam):
         env = gym.make(ENV_NAME)
         env = gym.wrappers.Monitor(env, VIDEO_DIR+hparam, force=True)
 
-        # summary_ops, summary_vars = build_summaries()
+        summary_ops, summary_vars = build_summaries()
 
         for episode_i in range(N_EPISODES):
             # print("starting ep", episode)
@@ -349,21 +347,24 @@ def train(learning_rate, n_neurons, use_two_fc, use_dropout, hparam):
             discounted_rewards = np.reshape(discounted_rewards, (tensor_lengths, 1))
 
             # update policy
-            policy.actor.update_policy(states, action_probability_timeline, discounted_rewards)
+            losses = policy.actor.update_policy(states, action_probability_timeline, discounted_rewards)
+
+            # max_reward = np.max(losses)
+            # print("max reward", max_reward)
             # total_rewards.append(discounted_rewards.sum())
 
             # let's look at how our reward belief network is doing
             # reward_mse = np.mean((discounted_rewards - policy.predict_rewards(states, actions))**2)
             # reward_mses.append(reward_mse)
+
+            summary_str = sess.run(summary_ops, feed_dict={
+                summary_vars[0]: episode_length,
+                summary_vars[1]: discounted_rewards.sum(),
+                summary_vars[2]: discounted_rewards.mean(),
+                summary_vars[3]: losses
+            })
             #
-            # summary_str = sess.run(summary_ops, feed_dict={
-            #     summary_vars[0]: episode_length,
-            #     summary_vars[1]: discounted_rewards.sum(),
-            #     summary_vars[2]: discounted_rewards.mean()
-            #
-            # })
-            #
-            # writer.add_summary(summary_str, episode_i)
+            writer.add_summary(summary_str, episode_i)
             writer.flush()
 
             # print("episode {} | total reward {} | avg reward {} | time alive {}".format(
@@ -407,9 +408,11 @@ def build_summaries():
     b = tf.summary.scalar("Total discounted reward", episode_sum_discounted_reward)
     episode_avg_reward = tf.Variable(0.)
     c = tf.summary.scalar("Average Reward per action", episode_avg_reward)
+    losses = tf.placeholder("float", [None, 1])
+    d = tf.summary.histogram('Losses', losses)
 
-    summary_vars = [episode_time, episode_sum_discounted_reward, episode_avg_reward]
-    summary_ops = tf.summary.merge([a,b,c])
+    summary_vars = [episode_time, episode_sum_discounted_reward, episode_avg_reward, losses]
+    summary_ops = tf.summary.merge([a,b,c,d])
 
     return summary_ops, summary_vars
 
@@ -432,9 +435,9 @@ def build_summaries():
 
 def main(_):
     """parameter sweep to find the best model"""
-    for learning_rate in [1E-6, 1e-5]:
+    for learning_rate in [1E-6]:#, 1e-5]:
         for use_two_fc in [False]:
-            for n_neurons in [20,50,80]:
+            for n_neurons in [20]:#,50,80]:
                 for use_dropout in [False]:  # dropout always made things worse
                     # Construct a hyperparameter string for each one (example: "lr_1E-3,fc=2,conv=2)
                     hparam = make_hparam_string(learning_rate, n_neurons, use_two_fc, use_dropout)
