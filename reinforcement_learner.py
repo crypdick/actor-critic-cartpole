@@ -139,7 +139,7 @@ class ActorNetwork(object):
             self.action_taken = tf.placeholder("float", [None, ACTION_PROB_DIMS])
 
             cross_entropy = -1*tf.reduce_sum(self.action_taken*tf.log(self.action_predictor))
-            self.loss = -cross_entropy * self.input_rewards  # could also switch to l2 loss
+            self.loss = -cross_entropy * self.input_rewards  # could also switch to l2 loss  # TODO: should be -1?
             self.optimizer = tf.train.AdamOptimizer(self.learning_rate).minimize(self.loss)
 
     def mk_action_predictor_net(self):
@@ -155,11 +155,12 @@ class ActorNetwork(object):
             #     actor_net = tflearn.fully_connected(actor_net, name='fc2')
             # if self.use_dropout:
             #     actor_net = tflearn.dropout(actor_net, 0.5, name='actor_dropout')
-            actor_net = tflearn.fully_connected(actor_net, ACTION_PROB_DIMS, activation='softmax',
-                                                weights_init='truncated_normal', bias=True, bias_init='truncated_normal',
+            actor_net = tflearn.fully_connected(actor_net, ACTION_PROB_DIMS, weights_init='truncated_normal',
+                                                bias=True, bias_init='truncated_normal',
                                                 name='fc_output_action_probabilities')
             tflearn.summaries.add_trainable_vars_summary([actor_net.W, actor_net.b], name_prefix='final_layer')
-            tflearn.summaries.monitor_activation(actor_net)
+            actor_net = tflearn.activation(actor_net, activation='softmax', name='softmax')
+            tflearn.summaries.add_activations_summary([actor_net])
             summary_op = tf.summary.merge_all()
 
             return input_states, actor_net, summary_op
@@ -288,7 +289,6 @@ def train(learning_rate, n_neurons, use_two_fc, use_dropout, hparam):
     """runs all the episodes"""
     tf.reset_default_graph()
     with tf.Session() as sess:
-        writer = tf.summary.FileWriter(TENSORBOARD_RESULTS_DIR + hparam, sess.graph)
         policies = {'random': RandomPolicy, 'contrarian': ContrarianPolicy, 'policy_gradient': PolicyGradient}
         policy = policies['policy_gradient'](learning_rate, n_neurons, use_two_fc, use_dropout, sess=sess)
         sess.run(tf.global_variables_initializer())
@@ -296,6 +296,7 @@ def train(learning_rate, n_neurons, use_two_fc, use_dropout, hparam):
         env = gym.make(ENV_NAME)
         env = gym.wrappers.Monitor(env, VIDEO_DIR+hparam, force=True)
 
+        writer = tf.summary.FileWriter(TENSORBOARD_RESULTS_DIR + hparam, sess.graph)
         summary_ops, summary_vars = build_summaries()
 
         for episode_i in range(N_EPISODES):
