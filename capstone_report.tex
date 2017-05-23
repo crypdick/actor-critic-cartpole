@@ -20,24 +20,34 @@
 
 \section{Definition}
 %_(approx. 1-2 pages)_
-words
+
 \subsection*{Project Overview}
 %In this section, look to provide a high-level overview of the project in layman’s terms. Questions to ask yourself when writing this section:
 %- _Has an overview of the project been provided, such as the problem domain, project origin, and related datasets or input data?_
 %- _Has enough background information been given so that an uninformed reader would understand the problem domain and following problem statement?_
-%
+
+Reinforcement learners are a class of algorithms which learn to perform a task by taking actions and recieving feedback from its environment. The algorithm uses the feedback to optimize its behavior to maximize future rewards. These algorithms can amazingly become proficient at a given task-- outperforming humans in some domains-- without ever being given explicit directions, rules, explanations, or any domain knowledge whatsoever. Given enough time to test various strategies, a good reinforcement learning algorithm will converge to the optimal decision policy.
+
+In this work, I will use reinforcement learning to solve ``CartPole", a classic control problem with a binary choice at each timestep. This problem was first solved using neural network-like algorithms in 1983.\cite{og_cartpole} Reinforcement learning is capable of learning this task due to its relatively small state and output spaces.\cite{deep_pg}\cite{ddpg_blog}
+
 \subsection*{Problem Statement}
 %In this section, you will want to clearly define the problem that you are trying to solve, including the strategy (outline of tasks) you will use to achieve the desired solution. You should also thoroughly discuss what the intended solution will be for this problem. Questions to ask yourself when writing this section:
 %- _Is the problem statement clearly defined? Will the reader understand what you are expecting to solve?_
 %- _Have you thoroughly discussed how you will attempt to solve the problem?_
 %- _Is an anticipated solution clearly defined? Will the reader understand what results you are looking for?_
-%
+
+``CartPole" is a simple 2D game which simulates an upright pole connected by a hinge to a cart.\cite{cartpole} The cart moves freely on a frictionless surface. Each trial is initiated with the cart at the center of the environment and the pole upright. At each timestep, the agent has to choose between pushing the cart to left or to the right. The trial ends if the pole tilts 15$\degree$ away from vertical, if the cart has translated to the edge of the screen, or if the trial reaches its time limit. For each timestep in a trial, the game rewards the player +1 point.
+
+The goal is to train an algorithm which can maintain the pole upright and within bounds for all 200 timesteps.
+
 \subsection*{Metrics}
 %In this section, you will need to clearly define the metrics or calculations you will use to measure performance of a model or result in your project. These calculations and metrics should be justified based on the characteristics of the problem and problem domain. Questions to ask yourself when writing this section:
 %- _Are the metrics you’ve chosen to measure the performance of your models clearly discussed and defined?_
 %- _Have you provided reasonable justification for the metrics chosen based on the problem and solution?_
-%
-%
+
+The most salient metric is episode length, as the game is defined as solved when the algorithm can stay ``alive" until the time limit. However, the algorithm 
+Total discounted rewards
+Average discounted rewards
 \section{Analysis}
 %_(approx. 2-4 pages)_
 %
@@ -47,7 +57,11 @@ words
 %- _If a dataset is present for this problem, are statistics about the dataset calculated and reported? Have any relevant results from this calculation been discussed?_
 %- _If a dataset is **not** present for this problem, has discussion been made about the input space or input data for your problem?_
 %- _Are there any abnormalities or characteristics about the input space or dataset that need to be addressed? (categorical variables, missing values, outliers, etc.)_
-%
+
+For this task, my learner will be totally naive and will have no previous data to inform the policy. The game environment has a convenient open-source wrapper provided by OpenAI which allows us to step through trials.\cite{cartpole} At each timestep, the game provides the agent the current environment state as well as the reward for the action taken at the previous timestep.  The sensory input is the cart's position $x$, the cart's velocity $\dot x$, the pole's angle $\theta$ (measured in radians), and its rate of change $\dot\theta$.\cite{state_def} 
+
+Given the state and the chosen action, the agent is given immediate feedback from the game in the form of a reward. These (state, action, reward) pairs are crucial for the reinforcement algorithm to improve its policy from its experiences (discussed in the project design section).
+
 \subsection*{Exploratory Visualization}
 %In this section, you will need to provide some form of visualization that summarizes or extracts a relevant characteristic or feature about the data. The visualization should adequately support the data being used. Discuss why this visualization was chosen and how it is relevant. Questions to ask yourself when writing this section:
 %- _Have you visualized a relevant characteristic or feature about the dataset or input data?_
@@ -65,7 +79,10 @@ words
 %- _Has some result or value been provided that acts as a benchmark for measuring performance?_
 %- _Is it clear how this result or value was obtained (whether by data or by hypothesis)?_
 %
-%
+
+
+everything that used dropout crashed to 10 ts, so I removed that as a param.
+
 \section{Methodology}
 %_(approx. 3-5 pages)_
 %
