@@ -71,7 +71,6 @@ class RandomPolicy(Policy):
             probabilities = np.array([0., 1.])
         else:
             probabilities = np.array([1., 0.])
-
         return probabilities
 
 
@@ -104,7 +103,7 @@ class PolicyGradient(Policy):
         action_probabilities = self.sess.run(self.actor.action_predictor,
                                              feed_dict={self.actor.input_states: observed_states})
         # fixme activations aren't in tensorboard
-        tflearn.summaries.add_activations_summary([self.actor.action_predictor], name_prefix='actor_predictor_NET')
+        # tflearn.summaries.add_activations_summary([self.actor.action_predictor], name_prefix='actor_predictor_NET')
         action_probabilities = action_probabilities[0]  # reduce depth by 1
         return action_probabilities
 
@@ -138,7 +137,6 @@ class ActorNetwork(object):
         self.n_trainable_params = len(self.trainable_net_params)
 
         with tf.name_scope('optimizer'):
-
             self.input_rewards = tf.placeholder("float", [None, 1])
             self.action_taken = tf.placeholder("float", [None, ACTION_PROB_DIMS])
             # self.loss =  tf.placeholder("float", [None, 1])
@@ -156,17 +154,16 @@ class ActorNetwork(object):
             actor_net = tflearn.fully_connected(input_states, self.n_units,
                                                 weights_init='truncated_normal',
                                                 name='fc1')
-            tf.summary.histogram('fc1_DUB', actor_net.W)
-            tflearn.summaries.add_trainable_vars_summary([actor_net.W, actor_net.b], name_prefix='fc1')
+            # tf.summary.histogram('fc1_DUB', actor_net.W)
+            # tflearn.summaries.add_trainable_vars_summary([actor_net.W, actor_net.b], name_prefix='fc1')
             if self.use_two_fc:
-                actor_net = tflearn.fully_connected(actor_net,
-                                                    name='fc2')
+                actor_net = tflearn.fully_connected(actor_net, name='fc2')
             if self.use_dropout:
                 actor_net = tflearn.dropout(actor_net, 0.5, name='actor_dropout')
             actor_net = tflearn.fully_connected(actor_net, ACTION_PROB_DIMS, activation='softmax',
                                                 weights_init='truncated_normal', bias=True, bias_init='truncated_normal',
                                                 name='fc_output_action_probabilities')
-            tflearn.summaries.add_trainable_vars_summary([actor_net.W, actor_net.b], name_prefix='final_layer')
+            # tflearn.summaries.add_trainable_vars_summary([actor_net.W, actor_net.b], name_prefix='final_layer')
 
             return input_states, actor_net
 
@@ -301,7 +298,7 @@ def train(learning_rate, n_neurons, use_two_fc, use_dropout, hparam):
         env = gym.make(ENV_NAME)
         env = gym.wrappers.Monitor(env, VIDEO_DIR+hparam, force=True)
 
-        summary_ops, summary_vars = build_summaries()
+        # summary_ops, summary_vars = build_summaries()
 
         for episode_i in range(N_EPISODES):
             # print("starting ep", episode)
@@ -359,14 +356,14 @@ def train(learning_rate, n_neurons, use_two_fc, use_dropout, hparam):
             # reward_mse = np.mean((discounted_rewards - policy.predict_rewards(states, actions))**2)
             # reward_mses.append(reward_mse)
             #
-            summary_str = sess.run(summary_ops, feed_dict={
-                summary_vars[0]: episode_length,
-                summary_vars[1]: discounted_rewards.sum(),
-                summary_vars[2]: discounted_rewards.mean()
-
-            })
-
-            writer.add_summary(summary_str, episode_i)
+            # summary_str = sess.run(summary_ops, feed_dict={
+            #     summary_vars[0]: episode_length,
+            #     summary_vars[1]: discounted_rewards.sum(),
+            #     summary_vars[2]: discounted_rewards.mean()
+            #
+            # })
+            #
+            # writer.add_summary(summary_str, episode_i)
             writer.flush()
 
             # print("episode {} | total reward {} | avg reward {} | time alive {}".format(
