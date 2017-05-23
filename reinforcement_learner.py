@@ -11,7 +11,7 @@ os.environ["CUDA_VISIBLE_DEVICES"] = "1"  # use correct GPU
 ENV_NAME = 'CartPole-v0'
 RENDER_ENV = False
 VIDEO_DIR = './results/videos/'
-TENSORBOARD_RESULTS_DIR = './results/tensorboard/param_sweep6/'
+TENSORBOARD_RESULTS_DIR = './results/tensorboard/big_net/'
 
 STATE_DIM = 4
 ACTION_DIM = 1
@@ -19,7 +19,7 @@ ACTION_PROB_DIMS = 2
 ACTION_BOUND = 1  # 0 to 1
 ACTION_SPACE = [0, 1]
 
-N_EPISODES = 500
+N_EPISODES = 2000
 MAX_EP_STEPS = 200  # from CartPole env
 # ACTOR_LEARNING_RATE = 0.0001
 # CRITIC_LEARNING_RATE = 0.0001
@@ -155,12 +155,18 @@ class ActorNetwork(object):
             #     actor_net = tflearn.fully_connected(actor_net, name='fc2')
             # if self.use_dropout:
             #     actor_net = tflearn.dropout(actor_net, 0.5, name='actor_dropout')
+            actor_net = tflearn.fully_connected(actor_net, self.n_units,
+                                                weights_init='truncated_normal',
+                                                name='fc2')
+            actor_net = tflearn.fully_connected(actor_net, self.n_units,
+                                                weights_init='truncated_normal',
+                                                name='fc3')
             actor_net = tflearn.fully_connected(actor_net, ACTION_PROB_DIMS, weights_init='truncated_normal',
                                                 bias=True, bias_init='truncated_normal',
-                                                name='fc_output_action_probabilities')
-            tflearn.summaries.add_trainable_vars_summary([actor_net.W, actor_net.b], name_prefix='final_layer')
+                                                name='fc4')
+            tflearn.summaries.add_trainable_vars_summary([actor_net.W, actor_net.b], name_prefix='fc4')
             actor_net = tflearn.activation(actor_net, activation='softmax', name='softmax')
-            tflearn.summaries.add_activations_summary([actor_net])
+            tflearn.summaries.add_activations_summary([actor_net], name_prefix='softmax')
             summary_op = tf.summary.merge_all()
 
             return input_states, actor_net, summary_op
@@ -441,7 +447,7 @@ def main(_):
     """parameter sweep to find the best model"""
     for learning_rate in [1E-6]:#, 1e-5]:
         for use_two_fc in [False]:
-            for n_neurons in [20]:#,50,80]:
+            for n_neurons in [100]:#,50,80]:
                 for use_dropout in [False]:  # dropout always made things worse
                     # Construct a hyperparameter string for each one (example: "lr_1E-3,fc=2,conv=2)
                     hparam = make_hparam_string(learning_rate, n_neurons, use_two_fc, use_dropout)
