@@ -286,13 +286,15 @@ class ActorNetwork(object):
 def train(learning_rate, n_neurons, use_two_fc, use_dropout, hparam):
     tf.reset_default_graph()
     sess = tf.Session()
-    env = gym.make(ENV_NAME)
+    writer = tf.summary.FileWriter(TENSORBOARD_RESULTS_DIR + hparam, sess.graph)
     policies = {'random': RandomPolicy, 'contrarian': ContrarianPolicy, 'policy_gradient': PolicyGradient}
     policy = policies['policy_gradient'](learning_rate, n_neurons, use_two_fc, use_dropout, sess=sess)
-    env = gym.wrappers.Monitor(env, VIDEO_DIR, force=True)
     sess.run(tf.global_variables_initializer())
-    writer = tf.summary.FileWriter(TENSORBOARD_RESULTS_DIR+hparam, sess.graph)
-    summary_ops, summary_vars = build_summaries()
+
+    env = gym.make(ENV_NAME)
+    env = gym.wrappers.Monitor(env, VIDEO_DIR, force=True)
+
+    # summary_ops, summary_vars = build_summaries()
 
     for episode_i in range(N_EPISODES):
         # print("starting ep", episode)
@@ -349,16 +351,16 @@ def train(learning_rate, n_neurons, use_two_fc, use_dropout, hparam):
         # let's look at how our reward belief network is doing
         # reward_mse = np.mean((discounted_rewards - policy.predict_rewards(states, actions))**2)
         # reward_mses.append(reward_mse)
+        #
+        # summary_str = sess.run(summary_ops, feed_dict={
+        #     summary_vars[0]: episode_length,
+        #     summary_vars[1]: discounted_rewards.sum(),
+        #     summary_vars[2]: discounted_rewards.mean()#,
+        #     # summary_vars[3]: reward_mse,
+        #
+        # })
 
-        summary_str = sess.run(summary_ops, feed_dict={
-            summary_vars[0]: episode_length,
-            summary_vars[1]: discounted_rewards.sum(),
-            summary_vars[2]: discounted_rewards.mean()#,
-            # summary_vars[3]: reward_mse,
-
-        })
-
-        writer.add_summary(summary_str, episode_i)
+        # writer.add_summary(summary_str, episode_i)
         writer.flush()
 
         # print("episode {} | total reward {} | avg reward {} | time alive {} | reward loss {}".format(
