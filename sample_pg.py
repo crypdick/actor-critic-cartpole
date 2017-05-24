@@ -77,10 +77,13 @@ def discount_rewards(r):
     for t in reversed(range(0, r.size)):
         running_add = running_add * gamma + r[t]
         discounted_r[t] = running_add
+    # size the rewards to be unit normal (helps control the gradient estimator variance)
+        discounted_r -= np.mean(discounted_r)
+    discounted_r /= np.std(discounted_r)
     return discounted_r
 
 
-states, rewards, fake_labels, action_probs = [], [], [], []
+states, rewards, fake_action_labels, action_probs = [], [], [], []
 running_reward = None
 reward_sum = 0
 episode_number = 1
@@ -92,16 +95,16 @@ init = tf.global_variables_initializer()
 with tf.Session() as sess:
     rendering = False
     sess.run(init)
-    observation = env.reset()  # Obtain an initial observation of the environment
+    state = env.reset()  # Obtain an initial observation of the environment
 
     # Reset the gradient placeholder. We will collect gradients in
     # gradBuffer until we are ready to update our policy network.
     gradBuffer = sess.run(trainable_vars)
     for ix, grad in enumerate(gradBuffer):
-        gradBuffer[ix] = grad * 0
+        gradBuffer[ix] = np.zeros_like(grad)
 
     while episode_number <= total_episodes:
-
+        state = np.reshape(state, [1, STATE_DIM])
         # Rendering the environment slows things down,
         # so let's only look at it once our agent is doing a good job.
         # if reward_sum / batch_size > 100 or rendering == True:
@@ -109,7 +112,7 @@ with tf.Session() as sess:
         #     rendering = True
 
         # Make sure the observation is in a shape the network can handle.
-        state = np.reshape(observation, [1, STATE_DIM])
+
 
         # Run the policy network and get an action to take.
         action_prob = sess.run(probability, feed_dict={input_states: state})
@@ -117,10 +120,10 @@ with tf.Session() as sess:
 
         states.append(state)  # observation
         fake_label = 1 if action == 0 else 0  # a "fake label"
-        fake_labels.append(fake_label)
+        fake_action_labels.append(fake_label)
 
         # step the environment and get new measurements
-        observation, reward, done, info = env.step(action)
+        next_state, reward, done, info = env.step(action)
         reward_sum += reward
 
         rewards.append(reward)  # record reward (has to be done after we call step() to get reward for previous action)
@@ -129,16 +132,14 @@ with tf.Session() as sess:
             episode_number += 1
             # stack together all inputs, hidden states, action gradients, and rewards for this episode
             ep_states = np.vstack(states)
-            ep_fake_labels = np.vstack(fake_labels)
+            ep_fake_labels = np.vstack(fake_action_labels)
             ep_rewards = np.vstack(rewards)
             ep_probabs = action_probs
-            states, rewards, fake_labels, action_probs = [], [], [], []  # reset array memory
+            states, rewards, fake_action_labels, action_probs = [], [], [], []  # reset array memory
 
             # compute the discounted reward backwards through time
             discounted_ep_rewards = discount_rewards(ep_rewards)
-            # size the rewards to be unit normal (helps control the gradient estimator variance)
-            discounted_ep_rewards -= np.mean(discounted_ep_rewards)
-            discounted_ep_rewards /= np.std(discounted_ep_rewards)
+
             # print(discounted_epr)
 
             # Get the gradient for this episode, and save it in the gradBuffer
@@ -150,7 +151,7 @@ with tf.Session() as sess:
             if episode_number % batch_size == 0:
                 sess.run(updateGrads, feed_dict={W1Grad: gradBuffer[0], W2Grad: gradBuffer[1]})
                 for ix, grad in enumerate(gradBuffer):
-                    gradBuffer[ix] = grad * 0
+                    gradBuffer[ix] = np.zeros_like(grad)
 
                 # Give a summary of how well our network is doing for each batch of episodes.
                 running_reward = reward_sum if running_reward is None else running_reward * 0.99 + reward_sum * 0.01
