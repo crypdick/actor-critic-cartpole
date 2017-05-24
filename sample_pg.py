@@ -1,3 +1,6 @@
+# forked this working pgradient from
+# https://gist.github.com/awjuliani/86ae316a231bceb96a3e2ab3ac8e646a#file-rl-tutorial-2-ipynb
+
 import numpy as np
 import tensorflow as tf
 import os
@@ -57,14 +60,11 @@ advantages = tf.placeholder(tf.float32, name="reward_signal")
 
 # The loss function. This sends the weights in the direction of making actions
 # that gave good advantage (reward over time) more likely, and actions that didn't less likely.
-# prob_of_other_action = ((ep_flabels * (1 - probability)) +
-#                                     ((1 - ep_flabels) * probability))
-# print("at", self.action_taken)
+prob_of_other_action = ((ep_flabels * (1 - probability)) +
+                                    ((1 - ep_flabels) * probability))
 # print("pother", prob_of_other_action)
-# log_likelihood_wrong_action = tf.log(prob_of_other_action)
-
-loglik = tf.log(ep_flabels * (ep_flabels - probability) + (1 - ep_flabels) * (ep_flabels + probability))
-loss = -tf.reduce_mean(loglik * advantages)
+log_likelihood_wrong_action = tf.log(prob_of_other_action)
+loss = -tf.reduce_mean(log_likelihood_wrong_action * advantages)
 newGrads = tf.gradients(loss, trainable_vars)
 
 # Once we have collected a series of gradients from multiple episodes, we apply them.
