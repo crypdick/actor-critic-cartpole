@@ -45,18 +45,24 @@ score = tf.matmul(layer1,W2)
 print("score", np.shape(score))
 
 probability = tf.nn.sigmoid(score)
-print("p sha", np.shape(probability))
+print("prob sha", np.shape(probability))
 
 #From here we define the parts of the network needed for learning a good policy.
 trainable_vars = tf.trainable_variables()
 print("tvar shape", np.shape(trainable_vars))  # (2,)
 print("tvar", trainable_vars)  # (2,)  [<tf.Variable 'W1:0' shape=(4, 10) dtype=float32_ref>, <tf.Variable 'W2:0' shape=(10, 1) dtype=float32_ref>]
-input_y = tf.placeholder(tf.float32,[None,1], name="input_y")
+ep_flabels = tf.placeholder(tf.float32, [None, 1], name="input_y")
 advantages = tf.placeholder(tf.float32,name="reward_signal")
 
 # The loss function. This sends the weights in the direction of making actions
 # that gave good advantage (reward over time) more likely, and actions that didn't less likely.
-loglik = tf.log(input_y*(input_y - probability) + (1 - input_y)*(input_y + probability))
+# prob_of_other_action = ((ep_flabels * (1 - probability)) +
+#                                     ((1 - ep_flabels) * probability))
+# print("at", self.action_taken)
+# print("pother", prob_of_other_action)
+# log_likelihood_wrong_action = tf.log(prob_of_other_action)
+
+loglik = tf.log(ep_flabels * (ep_flabels - probability) + (1 - ep_flabels) * (ep_flabels + probability))
 loss = -tf.reduce_mean(loglik * advantages)
 newGrads = tf.gradients(loss, trainable_vars)
 
@@ -116,6 +122,7 @@ with tf.Session() as sess:
 
         # Run the policy network and get an action to take.
         action_prob = sess.run(probability, feed_dict={input_states: state})
+        # print("a prob", action_prob)  #[[N]]
         action = 1 if np.random.uniform() < action_prob else 0
 
         states.append(state)  # observation
@@ -143,7 +150,7 @@ with tf.Session() as sess:
             # print(discounted_epr)
 
             # Get the gradient for this episode, and save it in the gradBuffer
-            gradients = sess.run(newGrads, feed_dict={input_states: ep_states, input_y: ep_fake_labels, advantages: discounted_ep_rewards})
+            gradients = sess.run(newGrads, feed_dict={input_states: ep_states, ep_flabels: ep_fake_labels, advantages: discounted_ep_rewards})
             for ix, grad in enumerate(gradients):
                 gradBuffer[ix] += grad  # gradients add onto themselves, variances smooth out
 
@@ -155,9 +162,7 @@ with tf.Session() as sess:
 
                 # Give a summary of how well our network is doing for each batch of episodes.
                 running_reward = reward_sum if running_reward is None else running_reward * 0.99 + reward_sum * 0.01
-                print(
-                'Average reward for episode %f.  Total average reward %f.' % (
-                reward_sum / batch_size, running_reward / batch_size))
+                print('Average reward for episode %f.  Total average reward %f.' % (reward_sum / batch_size, running_reward / batch_size))
 
                 if reward_sum / batch_size > 200:
                     print(
