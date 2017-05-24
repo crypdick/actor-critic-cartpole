@@ -11,13 +11,12 @@ os.environ["CUDA_VISIBLE_DEVICES"] = "1"  # use correct GPU
 ENV_NAME = 'CartPole-v0'
 RENDER_ENV = False
 VIDEO_DIR = './results/videos/'
-TENSORBOARD_RESULTS_DIR = './results/tensorboard/big_net/'
+TENSORBOARD_RESULTS_DIR = './results/tensorboard/big_net1/'
 
 STATE_DIM = 4
 ACTION_DIM = 1
-ACTION_PROB_DIMS = 2
 ACTION_BOUND = 1  # 0 to 1
-ACTION_SPACE = [0, 1]
+ACTION_SPACE = [1, 0]  # it is important actions are in this order due to how we set up out log-probability func
 
 N_EPISODES = 2000
 MAX_EP_STEPS = 200  # from CartPole env
@@ -56,7 +55,8 @@ class Policy(object):
         self.action_space = ACTION_SPACE
 
     def choose_action(self, probabilities):
-        choice = int(np.random.choice(ACTION_SPACE, 1, p=probabilities))
+        prob_per_action = [probabilities, 1 - probabilities]  # compensate for having one probability
+        choice = int(np.random.choice(ACTION_SPACE, 1, p=prob_per_action))
         return choice
 
 
@@ -100,9 +100,9 @@ class PolicyGradient(Policy):
         # self.critic = CriticNetwork(self.sess, self.actor.n_trainable_params)
 
     def calc_action_probabilities(self, observed_states):
-        action_probabilities, summaries = self.sess.run([self.actor.action_predictor, self.actor.summary_op1],
+        action_probabilities, summaries = self.sess.run([self.actor.action_probability_op, self.actor.summary_op1],
                                                         feed_dict={self.actor.input_states: observed_states})
-        action_probabilities = action_probabilities[0]  # reduce depth by 1
+        action_probabilities = action_probabilities[0][0]  # reduce depth by to extract float
         return action_probabilities, summaries
 
     # def predict_rewards(self, observed_states, observed_actions):
@@ -130,43 +130,55 @@ class ActorNetwork(object):
         self.n_units = n_neurons
         self.use_two_fc = use_two_fc
         self.use_dropout = use_dropout
-        self.input_states, self.action_predictor, self.summary_op1 = self.mk_action_predictor_net()
+        self.input_states, self.action_probability_op, self.summary_op1 = self.mk_action_predictor_net()
         self.trainable_net_params = tf.trainable_variables()
         self.n_trainable_params = len(self.trainable_net_params)
 
         with tf.name_scope('optimizer'):
-            self.input_rewards = tf.placeholder("float", [None, 1])
-            self.action_taken = tf.placeholder("float", [None, ACTION_PROB_DIMS])
+            self.reward_signal = tf.placeholder("float", [None, 1], name='reward_signal')
+            self.action_taken = tf.placeholder("float", [None, ACTION_DIM], name='action_taken')
+            # self.action_probabilities = tf.placeholder("float", [None, ACTION_DIM], name='action_predictions')
 
-            cross_entropy = -1*tf.reduce_sum(self.action_taken*tf.log(self.action_predictor))
-            self.loss = -cross_entropy * self.input_rewards  # could also switch to l2 loss  # TODO: should be -1?
-            self.optimizer = tf.train.AdamOptimizer(self.learning_rate).minimize(self.loss)
+            # If action_taken is 0, then the first term is eliminated, and it becomes tf.log(probability) .
+            # If action_taken is 1 instead then it becomes tf.log(1-probability)
+            #  we ensure that the term inside the log is never negative, and that we can compute the gradient
+            # no matter which action is taken
+            prob_of_other_action = ((self.action_taken * (1 - self.action_probability_op)) +
+                                    ((1 - self.action_taken) * self.action_probability_op))
+            # print("at", self.action_taken)
+            # print("pother", prob_of_other_action)
+            log_likelihood_wrong_action = tf.log(prob_of_other_action)
+            # print("sh loglike", log_likelihood_wrong_action)
+            # scale loss according to the reward  TODO: should this be the opposite sign?
+            # self.loss = -tf.reduce_mean(log_likelihood_wrong_action * self.reward_signal)
+            self.loss = -tf.multiply(log_likelihood_wrong_action, self.reward_signal)  # fixme
+            # print('loss', self.loss)  # shape ()
+
+            # self.gradient_wrt_params = tf.gradients(self.loss, self.trainable_net_params)  # [None, None, None, None]      :C :C
+            self.optimizer = tf.train.AdamOptimizer(self.learning_rate)
+            # self.gradient_wrt_params = self.optimizer.compute_gradients(self.loss, self.trainable_net_params)
+            # print(self.gradient_wrt_params)  # [None, None, None, None]      :C :C
+            self.optimize_step = self.optimizer.minimize(self.loss)
 
     def mk_action_predictor_net(self):
         """neural network that outputs probabilities of each action"""
         with tf.name_scope('action_predictor_net'):
             input_states = tflearn.input_data(shape=[None, STATE_DIM], name='input_state')
-            actor_net = tflearn.fully_connected(input_states, self.n_units,
+            actor_net = tflearn.fully_connected(input_states, self.n_units, activation='relu',
                                                 weights_init='truncated_normal',
                                                 name='fc1')
-            # # tf.summary.histogram('fc1_DUB', actor_net.W)
-            tflearn.summaries.add_trainable_vars_summary([actor_net.W, actor_net.b], name_prefix='fc1')
+            tflearn.summaries.add_trainable_vars_summary([actor_net.W], name_prefix='fc1')
             # if self.use_two_fc:
             #     actor_net = tflearn.fully_connected(actor_net, name='fc2')
             # if self.use_dropout:
             #     actor_net = tflearn.dropout(actor_net, 0.5, name='actor_dropout')
-            actor_net = tflearn.fully_connected(actor_net, self.n_units,
-                                                weights_init='truncated_normal',
-                                                name='fc2')
-            actor_net = tflearn.fully_connected(actor_net, self.n_units,
-                                                weights_init='truncated_normal',
-                                                name='fc3')
-            actor_net = tflearn.fully_connected(actor_net, ACTION_PROB_DIMS, weights_init='truncated_normal',
+            # we output a single number which corresponds to our score
+            actor_net = tflearn.fully_connected(actor_net, ACTION_DIM, weights_init='truncated_normal',
                                                 bias=True, bias_init='truncated_normal',
-                                                name='fc4')
+                                                name='score')
             tflearn.summaries.add_trainable_vars_summary([actor_net.W, actor_net.b], name_prefix='fc4')
-            actor_net = tflearn.activation(actor_net, activation='softmax', name='softmax')
-            tflearn.summaries.add_activations_summary([actor_net], name_prefix='softmax')
+            actor_net = tflearn.activation(actor_net, activation='sigmoid', name='probability')
+            tflearn.summaries.add_activations_summary([actor_net], name_prefix='sigmoid')
             summary_op = tf.summary.merge_all()
 
             return input_states, actor_net, summary_op
@@ -188,8 +200,8 @@ class ActorNetwork(object):
     #                   feed_dict={self.input_states: in_states, self.gradient_wrt_actions: action_gradient})
 
     # def mk_trainer(self):
-    #     # actions_taken = tf.placeholder(dtype=tf.float32, shape=[None, ACTION_PROB_DIMS], name="actions_taken")
-    #     # action_probabilities = tf.placeholder(dtype=tf.float32, shape=[None, ACTION_PROB_DIMS], name="action_predictions")
+    #     # actions_taken = tf.placeholder(dtype=tf.float32, shape=[None, ACTION_DIM], name="actions_taken")
+    #     # action_probabilities = tf.placeholder(dtype=tf.float32, shape=[None, ACTION_DIM], name="action_predictions")
     #     discounted_rewards = tf.placeholder(dtype=tf.float32, shape=[None, 1], name="discounted_rewards")
     #     # loss = tf.nn.l2_loss(actions_taken - action_probabilities)  # this gradient encourages the actions taken
     #     loss = tf.placeholder(dtype=tf.float32, shape=[None, 1], name='loss')
@@ -198,12 +210,15 @@ class ActorNetwork(object):
     #     optimizer_step = optimizer.apply_gradients(action_gradients)
     #     return loss, discounted_rewards, optimizer_step
 
-    def update_policy(self, input_states, action_probability_timeline, observed_rewards):
+    def update_policy(self, ovserved_states, actions_taken, actions_predicted, observed_rewards):
         """when episode concludes, lets update our actors and critics"""
-        _, losses = self.sess.run([self.optimizer, self.loss],
-                                       feed_dict={self.input_states: input_states,
-                                                  self.action_taken: action_probability_timeline,
-                                                  self.input_rewards: observed_rewards})
+        # print(np.shape(observed_rewards))
+        _, losses = self.sess.run([self.optimize_step, self.loss],
+                                  feed_dict={self.action_taken: actions_taken,
+                                             self.input_states: ovserved_states,
+                                             #self.action_probabilities: actions_predicted,
+                                             self.reward_signal: observed_rewards})
+        # print("losses out", losses)
         return losses
 
 
@@ -308,7 +323,7 @@ def train(learning_rate, n_neurons, use_two_fc, use_dropout, hparam):
         for episode_i in range(N_EPISODES):
             # print("starting ep", episode)
 
-            states, actions, action_probability_timeline, rewards = [], [], [], []
+            states, actions, probability_timeline, rewards = [], [], [], []
             summaries = []
 
             current_state = env.reset()
@@ -318,9 +333,9 @@ def train(learning_rate, n_neurons, use_two_fc, use_dropout, hparam):
             for ts in range(MAX_EP_STEPS):
                 if RENDER_ENV:
                     env.render()
-                action_probabilities, summary = policy.calc_action_probabilities(np.reshape(current_state, (1, STATE_DIM)))
+                action_probabilities, summary = policy.calc_action_probabilities(np.reshape(current_state, (1, STATE_DIM)))  # this is now just one probability
                 summaries.append(summary)
-                action_probability_timeline.append(action_probabilities)
+                probability_timeline.append(action_probabilities)
                 # print(action_probabilities)
                 action = policy.choose_action(action_probabilities)
                 actions.append(action)
@@ -347,16 +362,18 @@ def train(learning_rate, n_neurons, use_two_fc, use_dropout, hparam):
             # total_times.append(total_time)
 
             discounted_rewards = calc_discounted_rewards(rewards, episode_length)
-            # print(discounted_rewards)
+            # print("dr", discounted_rewards)
 
             # make our env observations into correct tensor shapes
             tensor_lengths = len(actions)
-            # actions = np.reshape(actions, (tensor_lengths, 1))
-            action_probability_timeline = np.reshape(action_probability_timeline, (tensor_lengths, ACTION_PROB_DIMS))
+            actions = np.reshape(actions, (tensor_lengths, 1))
+            states = np.reshape(states, (tensor_lengths, STATE_DIM))
+            probability_timeline = np.reshape(probability_timeline, (tensor_lengths, ACTION_DIM))
             discounted_rewards = np.reshape(discounted_rewards, (tensor_lengths, 1))
+            # print("drshape", np.shape(discounted_rewards))
 
             # update policy
-            losses = policy.actor.update_policy(states, action_probability_timeline, discounted_rewards)
+            losses = policy.actor.update_policy(states, actions, probability_timeline, discounted_rewards)
 
             # max_reward = np.max(losses)
             # print("max reward", max_reward)
@@ -365,12 +382,14 @@ def train(learning_rate, n_neurons, use_two_fc, use_dropout, hparam):
             # let's look at how our reward belief network is doing
             # reward_mse = np.mean((discounted_rewards - policy.predict_rewards(states, actions))**2)
             # reward_mses.append(reward_mse)
-
+            # TODO add gradients to summary
+            # print("sdr", np.shape(discounted_rewards))
             summary_str = sess.run(summary_ops, feed_dict={
                 summary_vars[0]: episode_length,
                 summary_vars[1]: discounted_rewards.sum(),
                 summary_vars[2]: discounted_rewards.mean(),
-                summary_vars[3]: losses
+                summary_vars[3]: losses,
+                summary_vars[4]: discounted_rewards
             })
             summaries.append(summary_str)
             for s in summaries:
@@ -395,10 +414,11 @@ def calc_discounted_rewards(rewards, total_time):
     discounted_rewards = np.zeros_like(rewards)
     running_rewards = 0.
     for i in range(total_time - 1, -1, -1):  # step backwards summary_varsin time from the end of the episode
+        # print(i)
         discounted_rewards[i] = rewards[i] + DISCOUNT_FACTOR * running_rewards
         running_rewards += discounted_rewards[i]
     # feature scaling/normalizing using standardization. reward vec will always have 0 mean and variance 1
-    # otherwise, early rewards become astronomical as the running reward gets added to each previous ts
+    # otherwise, early rewards become astronomical as the runninprint(g reward gets added to each previous ts
     # scaled rewards are much smaller, which makes it more stable for the neural network to approximate.
     # since we subtract the mean, we also see that the lat
     discounted_rewards -= discounted_rewards.mean()
@@ -420,9 +440,11 @@ def build_summaries():
     c = tf.summary.scalar("Average Reward per action", episode_avg_reward)
     losses = tf.placeholder("float", [None, 1])
     d = tf.summary.histogram('Losses', losses)
+    ep_rewards = tf.placeholder("float", [None, 1])
+    e = tf.summary.histogram("rewards", ep_rewards)
 
-    summary_vars = [episode_time, episode_sum_discounted_reward, episode_avg_reward, losses]
-    summary_ops = tf.summary.merge([a,b,c,d])
+    summary_vars = [episode_time, episode_sum_discounted_reward, episode_avg_reward, losses, ep_rewards]
+    summary_ops = tf.summary.merge([a,b,c,d,e])
 
     return summary_ops, summary_vars
 
@@ -447,7 +469,7 @@ def main(_):
     """parameter sweep to find the best model"""
     for learning_rate in [1E-6]:#, 1e-5]:
         for use_two_fc in [False]:
-            for n_neurons in [100]:#,50,80]:
+            for n_neurons in [50]:#,50,80]:
                 for use_dropout in [False]:  # dropout always made things worse
                     # Construct a hyperparameter string for each one (example: "lr_1E-3,fc=2,conv=2)
                     hparam = make_hparam_string(learning_rate, n_neurons, use_two_fc, use_dropout)
