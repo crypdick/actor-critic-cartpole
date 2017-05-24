@@ -3,6 +3,8 @@ import tensorflow as tf
 import gym
 import tflearn
 import os
+import random
+from collections import deque
 
 # use correct gpu
 os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"  # see issue #152
@@ -11,20 +13,22 @@ os.environ["CUDA_VISIBLE_DEVICES"] = "1"  # use correct GPU
 ENV_NAME = 'CartPole-v0'
 RENDER_ENV = False
 VIDEO_DIR = './results/videos/'
-TENSORBOARD_RESULTS_DIR = './results/tensorboard/big_net1/'
+TENSORBOARD_RESULTS_DIR = './results/tensorboard/with_buffer1/'
 
 STATE_DIM = 4
 ACTION_DIM = 1
 ACTION_BOUND = 1  # 0 to 1
 ACTION_SPACE = [1, 0]  # it is important actions are in this order due to how we set up out log-probability func
 
-N_EPISODES = 2000
+N_EPISODES = 1000
 MAX_EP_STEPS = 200  # from CartPole env
 # ACTOR_LEARNING_RATE = 0.0001
 # CRITIC_LEARNING_RATE = 0.0001
 # discount factor
 # the relevant window into the future is about 10 timesteps. (1 *0.7)^10 shrinks to 3% after 10 timesteps.
 DISCOUNT_FACTOR = 0.95  # aka gamma
+REPLAY_SIZE = 10000 # experience replay buffer size
+BATCH_SIZE = 32 # size of minibatch
 
 # https://www.youtube.com/watch?v=oPGVsoBonLM
 # policy gradient goal: maximize E[Reward|policy*]
@@ -134,6 +138,9 @@ class ActorNetwork(object):
         self.trainable_net_params = tf.trainable_variables()
         self.n_trainable_params = len(self.trainable_net_params)
 
+        # init experience replay
+        self.replay_buffer = deque()
+
         with tf.name_scope('optimizer'):
             self.reward_signal = tf.placeholder("float", [None, 1], name='reward_signal')
             self.action_taken = tf.placeholder("float", [None, ACTION_DIM], name='action_taken')
@@ -142,7 +149,7 @@ class ActorNetwork(object):
             # If action_taken is 0, then the first term is eliminated, and it becomes tf.log(probability) .
             # If action_taken is 1 instead then it becomes tf.log(1-probability)
             #  we ensure that the term inside the log is never negative, and that we can compute the gradient
-            # no matter which action is taken
+            # no matter which action is taken # fixme should I be using action probs directly
             prob_of_other_action = ((self.action_taken * (1 - self.action_probability_op)) +
                                     ((1 - self.action_taken) * self.action_probability_op))
             # print("at", self.action_taken)
@@ -210,14 +217,34 @@ class ActorNetwork(object):
     #     optimizer_step = optimizer.apply_gradients(action_gradients)
     #     return loss, discounted_rewards, optimizer_step
 
-    def update_policy(self, ovserved_states, actions_taken, actions_predicted, observed_rewards):
+    def perceive(self, observed_states, actions_taken, observed_rewards, done):
+        self.replay_buffer.append((observed_states, actions_taken, observed_rewards, done))
+        if len(self.replay_buffer) > REPLAY_SIZE:
+            self.replay_buffer.popleft()
+            # losses = None
+
+        if len(self.replay_buffer) > BATCH_SIZE:
+            losses = self.update_policy()
+        # return losses
+
+    def update_policy(self):
         """when episode concludes, lets update our actors and critics"""
+        minibatch = random.sample(self.replay_buffer, BATCH_SIZE)
+        state_batch = [data[0] for data in minibatch]
+        action_batch = [data[1] for data in minibatch]
+        reward_batch = [data[2] for data in minibatch]
+        discounted_rewards = calc_discounted_rewards(reward_batch, BATCH_SIZE)
+
+        action_batch = np.reshape(action_batch, (BATCH_SIZE, 1))
+        state_batch = np.reshape(state_batch, (BATCH_SIZE, STATE_DIM))
+        discounted_rewards = np.reshape(discounted_rewards, (BATCH_SIZE, 1))
         # print(np.shape(observed_rewards))
         _, losses = self.sess.run([self.optimize_step, self.loss],
-                                  feed_dict={self.action_taken: actions_taken,
-                                             self.input_states: ovserved_states,
+                                  feed_dict={self.action_taken: action_batch,
+                                             self.input_states: state_batch,
                                              #self.action_probabilities: actions_predicted,
-                                             self.reward_signal: observed_rewards})
+                                             self.reward_signal: discounted_rewards})
+        # writer.add_summary(losses, episode_i)
         # print("losses out", losses)
         return losses
 
@@ -317,9 +344,11 @@ def train(learning_rate, n_neurons, use_two_fc, use_dropout, hparam):
         env = gym.make(ENV_NAME)
         env = gym.wrappers.Monitor(env, VIDEO_DIR+hparam, force=True)
 
+        global writer
         writer = tf.summary.FileWriter(TENSORBOARD_RESULTS_DIR + hparam, sess.graph)
         summary_ops, summary_vars = build_summaries()
 
+        global episode_i
         for episode_i in range(N_EPISODES):
             # print("starting ep", episode)
 
@@ -341,7 +370,9 @@ def train(learning_rate, n_neurons, use_two_fc, use_dropout, hparam):
                 actions.append(action)
                 future_state, reward, done, info = env.step(action)
                 # print("reward", reward)
+                reward = -1. if done else reward  # change final reward to negative
                 rewards.append(reward)
+
                 # print("future state ", np.shape(future_state))
 
                 #  custom reward function to manually promote low thetas and x around 0
@@ -349,6 +380,8 @@ def train(learning_rate, n_neurons, use_two_fc, use_dropout, hparam):
                 # low_theta_bonus = -100. * (theta ** 2.) + 1.  # reward of 1 at 0 rads, reward of 0 at +- 0.1 rad/6 deg)
                 # # center_pos_bonus = -1 * abs(0.5 * x) + 1  # bonus of 1.0 at x=0, goes down to 0 as x approaches edge
                 # reward += low_theta_bonus
+
+                losses = policy.actor.perceive(current_state, action, reward, done)
 
                 current_state = future_state
 
@@ -373,7 +406,7 @@ def train(learning_rate, n_neurons, use_two_fc, use_dropout, hparam):
             # print("drshape", np.shape(discounted_rewards))
 
             # update policy
-            losses = policy.actor.update_policy(states, actions, probability_timeline, discounted_rewards)
+            # losses = policy.actor.update_policy(states, actions, probability_timeline, discounted_rewards)
 
             # max_reward = np.max(losses)
             # print("max reward", max_reward)
@@ -388,8 +421,7 @@ def train(learning_rate, n_neurons, use_two_fc, use_dropout, hparam):
                 summary_vars[0]: episode_length,
                 summary_vars[1]: discounted_rewards.sum(),
                 summary_vars[2]: discounted_rewards.mean(),
-                summary_vars[3]: losses,
-                summary_vars[4]: discounted_rewards
+                summary_vars[3]: discounted_rewards
             })
             summaries.append(summary_str)
             for s in summaries:
@@ -438,13 +470,13 @@ def build_summaries():
     b = tf.summary.scalar("Total discounted reward", episode_sum_discounted_reward)
     episode_avg_reward = tf.Variable(0.)
     c = tf.summary.scalar("Average Reward per action", episode_avg_reward)
-    losses = tf.placeholder("float", [None, 1])
-    d = tf.summary.histogram('Losses', losses)
+    # losses = tf.placeholder("float", [None, 1])
+    # d = tf.summary.histogram('Losses', losses)
     ep_rewards = tf.placeholder("float", [None, 1])
     e = tf.summary.histogram("rewards", ep_rewards)
 
-    summary_vars = [episode_time, episode_sum_discounted_reward, episode_avg_reward, losses, ep_rewards]
-    summary_ops = tf.summary.merge([a,b,c,d,e])
+    summary_vars = [episode_time, episode_sum_discounted_reward, episode_avg_reward, ep_rewards]
+    summary_ops = tf.summary.merge([a,b,c,e])
 
     return summary_ops, summary_vars
 
