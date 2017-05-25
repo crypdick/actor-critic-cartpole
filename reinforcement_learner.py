@@ -11,7 +11,7 @@ os.environ["CUDA_VISIBLE_DEVICES"] = "1"  # use correct GPU
 
 ENV_NAME = 'CartPole-v0'
 VIDEO_DIR = './results/videos/'
-TENSORBOARD_RESULTS_DIR = './results/tensorboard/with_buffer1/'
+TENSORBOARD_RESULTS_DIR = './results/tensorboard/with_grad_buffer1/'
 
 STATE_DIM = 4
 ACTION_DIM = 1
@@ -138,7 +138,6 @@ class ActorNetwork(object):
         (self.reward_signal, self.ep_fake_action_labels, self.loss, self.gradient_wrt_params, self.optimizer,
          self.W1_gradients, self.W2_gradients, self.optimize_step, self.summary_op2) = self.mk_optimizer()
 
-
     def mk_action_predictor_net(self):
         """neural network that outputs probabilities of each action"""
         with tf.name_scope('action_predictor_net'):
@@ -162,7 +161,6 @@ class ActorNetwork(object):
             summary_op = tf.summary.merge_all()
 
             return input_states, actor_net, summary_op
-
 
     def mk_optimizer(self):
         with tf.name_scope('optimizer'):
@@ -191,25 +189,22 @@ class ActorNetwork(object):
 
             optimize_step = optimizer.apply_gradients(zip(batch_gradients, self.trainable_net_params))
 
-
             summary_op = tf.summary.merge_all()
 
             return reward_signal, ep_fake_action_labels, loss, gradient_wrt_params, optimizer, W1_gradients, \
-                   W2_gradients, optimize_step, summary_op
-
+                W2_gradients, optimize_step, summary_op
 
     def calc_gradient(self, ep_states, ep_fake_labels, ep_discounted_rewards):
         gradients, summary = self.sess.run([self.gradient_wrt_params, self.summary_op2],
-                             feed_dict={self.input_states: ep_states,
-                                        self.ep_fake_action_labels: ep_fake_labels,
-                                        self.reward_signal: ep_discounted_rewards})
+                                           feed_dict={self.input_states: ep_states,
+                                                      self.ep_fake_action_labels: ep_fake_labels,
+                                                      self.reward_signal: ep_discounted_rewards})
 
         return gradients, summary
 
     def run_optimization_step(self, gradient_buffer):
         self.sess.run(self.optimize_step, feed_dict={self.W1_gradients: gradient_buffer[0],
                                                      self.W2_gradients: gradient_buffer[1]})
-
 
 
 # class CriticNetwork(object):
@@ -305,11 +300,9 @@ def run_episodes(policy, sess, batch_size, hparam):
     # env = gym.wrappers.Monitor(env, VIDEO_DIR+hparam, force=True)
     render_env = False
 
-    global writer
     writer = tf.summary.FileWriter(TENSORBOARD_RESULTS_DIR + hparam, sess.graph)
     summary_ops, summary_vars = build_summaries()
 
-    global episode_i
     episode_i = 1
     batch_reward_sum = 0
 
@@ -379,25 +372,22 @@ def run_episodes(policy, sess, batch_size, hparam):
         # ep_action_probs = action_probabilities
 
         ep_discounted_rewards = calc_discounted_rewards(ep_rewards)
-        # print("dr", discounted_rewards)
-
-        # make our env observations into correct tensor shapes
-        # tensor_lengths = len(actions)
-        # actions = np.reshape(actions, (tensor_lengths, 1))
-        # states = np.reshape(states, (tensor_lengths, STATE_DIM))
-        # action_probabilities = np.reshape(action_probabilities, (tensor_lengths, ACTION_DIM))
-        # discounted_rewards = np.reshape(discounted_rewards, (tensor_lengths, 1))
-        # print("drshape", np.shape(discounted_rewards))
-
-        # update policy
-        # losses = policy.actor.update_policy(states, actions, probability_timeline, discounted_rewards)
-
-        # max_reward = np.max(losses)
-        # print("max reward", max_reward)
-        # total_rewards.append(discounted_rewards.sum())
 
         gradients, summary = policy.actor.calc_gradient(ep_states, ep_fake_labels, ep_discounted_rewards)
         summaries.append(summary)
+
+        thetas = ep_states[:, 2]
+
+        summary_str = sess.run(summary_ops, feed_dict={
+            summary_vars[0]: len(ep_rewards),
+            summary_vars[1]: thetas,
+            summary_vars[2]: ep_discounted_rewards
+        })
+        summaries.append(summary_str)
+        for s in summaries:
+            writer.add_summary(s, episode_i)
+        writer.flush()
+
         for ix, grad in enumerate(gradients):
             gradient_buffer[ix] += grad  # gradients add onto themselves, variances smooth out
 
@@ -410,7 +400,7 @@ def run_episodes(policy, sess, batch_size, hparam):
 
             # Give a summary of how well our network is doing for each batch of episodes.
             print("E {:d} Average reward for episode in last batch: {:.1f}".format(episode_i,
-                                                                                  batch_reward_sum / batch_size))
+                                                                                   batch_reward_sum / batch_size))
 
             if batch_reward_sum / batch_size > 200:
                 print("Task solved in", episode_i, 'episodes!')
@@ -418,41 +408,12 @@ def run_episodes(policy, sess, batch_size, hparam):
 
             batch_reward_sum = 0  # time for a new batch
 
-            # let's look at how our reward belief network is doing
-            # reward_mse = np.mean((discounted_rewards - policy.predict_rewards(states, actions))**2)
-            # reward_mses.append(reward_mse)
-            # TODO add gradients to summary
-            # print("sdr", np.shape(discounted_rewards))
-            # summary_str = sess.run(summary_ops, feed_dict={
-            #     summary_vars[0]: episode_length,
-            #     summary_vars[1]: ep_discounted_rewards.sum(),
-            #     summary_vars[2]: ep_discounted_rewards.mean(),
-            #     summary_vars[3]: ep_discounted_rewards
-            # })
-            # summaries.append(summary_str)
-            # for s in summaries:
-            #     writer.add_summary(s, episode_i)
-            # writer.flush()
-
-            # print("episode {} | total reward {} | avg reward {} | time alive {}".format(
-            #     episode_i,
-            #     discounted_rewards.sum(),
-            #     discounted_rewards.mean(),
-            #     episode_length
-            # ))
-
-            # TODO save these
-
-            # return total_times, total_rewards, reward_mses
-
 
 def calc_discounted_rewards(rewards):
     """rewards are reward at that specific timestep plus discounted value of future rewards in that trajectory"""
-    # print("r", rewards)
     discounted_rewards = np.zeros_like(rewards)
     running_rewards = 0.
     for t in reversed(range(0, rewards.size)):  # step backwards in time from the end of the episode
-        # print(i)
         running_rewards = rewards[t] + DISCOUNT_FACTOR * running_rewards  # fixme this seems wrong
         discounted_rewards[t] += running_rewards
     # feature scaling/normalizing using standardization. reward vec will always have 0 mean and variance 1
@@ -460,11 +421,7 @@ def calc_discounted_rewards(rewards):
     # scaled rewards are much smaller, which makes it more stable for the neural network to approximate.
     # since we subtract the mean, we also see that the lat
     discounted_rewards -= discounted_rewards.mean()
-    # decided to not subtract mean because the second half of the episode will never have a positive score.
-    # that isn't necessarily good because sometimes we simply run out of time (max episode length is only 200).
-    # we don't want to always be penalizing the end of an episode
     discounted_rewards /= discounted_rewards.std()
-    # print("r", discounted_rewards)
     return discounted_rewards
 
 
@@ -472,17 +429,17 @@ def build_summaries():
     """for doing a post-mortem in Tensorboard"""
     episode_time = tf.Variable(0.)
     a = tf.summary.scalar("Episode length", episode_time)
-    episode_sum_discounted_reward = tf.Variable(0.)
-    b = tf.summary.scalar("Total discounted reward", episode_sum_discounted_reward)
-    episode_avg_reward = tf.Variable(0.)
-    c = tf.summary.scalar("Average Reward per action", episode_avg_reward)
+    thetas = tf.placeholder("float", [None, 1])
+    b = tf.summary.histogram("Distribution of thetas", thetas)
+    # episode_avg_reward = tf.Variable(0.)
+    # c = tf.summary.scalar("Average Reward per action", episode_avg_reward)
     # losses = tf.placeholder("float", [None, 1])
     # d = tf.summary.histogram('Losses', losses)
     ep_rewards = tf.placeholder("float", [None, 1])
     e = tf.summary.histogram("rewards", ep_rewards)
 
-    summary_vars = [episode_time, episode_sum_discounted_reward, episode_avg_reward, ep_rewards]
-    summary_ops = tf.summary.merge([a, b, c, e])
+    summary_vars = [episode_time, thetas, ep_rewards]
+    summary_ops = tf.summary.merge([a, b, e])
 
     return summary_ops, summary_vars
 
