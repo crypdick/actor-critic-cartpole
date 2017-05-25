@@ -377,6 +377,7 @@ def run_episodes(policy, sess, batch_size, hparam):
         summaries.append(summary)
 
         thetas = ep_states[:, 2]
+        thetas = np.reshape(thetas, np.shape(ep_rewards))
 
         summary_str = sess.run(summary_ops, feed_dict={
             summary_vars[0]: len(ep_rewards),
