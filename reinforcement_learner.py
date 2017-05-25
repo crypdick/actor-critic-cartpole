@@ -11,7 +11,7 @@ os.environ["CUDA_VISIBLE_DEVICES"] = "1"  # use correct GPU
 
 ENV_NAME = 'CartPole-v0'
 VIDEO_DIR = './results/videos/'
-TENSORBOARD_RESULTS_DIR = './results/tensorboard/with_grad_buffer4/'
+TENSORBOARD_RESULTS_DIR_PREFIX = './results/tensorboard/with_grad_buffer4/'
 
 STATE_DIM = 4
 ACTION_DIM = 1
@@ -459,6 +459,8 @@ def build_summaries():
 def main(_):
     """parameter sweep to find the best model"""
     for i in range(5):  # repeat everything a few times to get statistical to get a sense of how stable models are
+        global TENSORBOARD_RESULTS_DIR
+        TENSORBOARD_RESULTS_DIR = TENSORBOARD_RESULTS_DIR_PREFIX + "{}/".format(i)  # put each iteration in a different folder for tensorboard
         for learning_rate in [1e-1]:#np.linspace(1e-1, 1e-2, 4):
             for use_two_fc in [False]:
                 for n_neurons in np.linspace(100,130, 4, dtype=np.int):
