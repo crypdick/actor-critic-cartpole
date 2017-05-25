@@ -136,7 +136,7 @@ class ActorNetwork(object):
         self.n_trainable_params = len(self.trainable_net_params)
 
         (self.reward_signal, self.ep_fake_action_labels, self.loss, self.gradient_wrt_params, self.optimizer,
-         self.W1_gradients, self.W2_gradients, self.optimize_step) = self.mk_optimizer()
+         self.W1_gradients, self.W2_gradients, self.optimize_step, self.summary_op2) = self.mk_optimizer()
 
 
     def mk_action_predictor_net(self):
@@ -168,37 +168,47 @@ class ActorNetwork(object):
         with tf.name_scope('optimizer'):
             reward_signal = tf.placeholder(tf.float32, [None, 1], name='reward_signal')
             # self.action_taken = tf.placeholder("float", [None, 1], name='action_taken')
-            ep_fake_action_labels = tf.placeholder(tf.float32, [None, 1], name="input_y")
+            ep_fake_action_labels = tf.placeholder(tf.float32, [None, 1], name="fake_actions")
             # self.action_probabilities = tf.placeholder("float", [None, ACTION_DIM], name='action_predictions')
 
             # If action_taken is 0, then the first term is eliminated, and it becomes tf.log(probability) .
             # If action_taken is 1 instead then it becomes tf.log(1-probability)
             #  we ensure that the term inside the log is never negative, and that we can compute the gradient
-            # no matter which action is taken # fixme should I be using action probs directly
+            # no matter which action is taken
             prob_of_other_action = ((ep_fake_action_labels * (1 - self.action_probability_op)) +
                                     ((1 - ep_fake_action_labels) * self.action_probability_op))
-            # print("at", self.action_taken)
-            # print("pother", prob_of_other_action)
             log_likelihood_wrong_action = tf.log(prob_of_other_action)
-            # print("sh loglike", log_likelihood_wrong_action)
-            # scale loss according to the reward  TODO: should this be the opposite sign?
-            # self.loss = -tf.reduce_mean(log_likelihood_wrong_action * self.reward_signal)
             loss = -tf.reduce_mean(log_likelihood_wrong_action * reward_signal)
-            # print('loss', self.loss)  # shape ()
 
-            gradient_wrt_params = tf.gradients(loss,
-                                               self.trainable_net_params)  # [None, None, None, None]      :C :C
+            gradient_wrt_params = tf.gradients(loss, self.trainable_net_params)
+            # for grad in gradient_wrt_params:
+            #     print(grad)
+            #     tflearn.summaries.add_gradients_summary([grad], name_prefix='ep_gradients')
             optimizer = tf.train.AdamOptimizer(self.learning_rate)
-            # self.gradient_wrt_params = self.optimizer.compute_gradients(self.loss, self.trainable_net_params)
-            # print(self.gradient_wrt_params)  # [None, None, None, None]      :C :C
-            W1_gradients = tf.placeholder(tf.float32,
-                                          name="batch_grad1")
+            W1_gradients = tf.placeholder(tf.float32, name="batch_grad1")
             W2_gradients = tf.placeholder(tf.float32, name="batch_grad2")
             batch_gradients = [W1_gradients, W2_gradients]
 
             optimize_step = optimizer.apply_gradients(zip(batch_gradients, self.trainable_net_params))
+
+
+            summary_op = tf.summary.merge_all()
+
             return reward_signal, ep_fake_action_labels, loss, gradient_wrt_params, optimizer, W1_gradients, \
-                   W2_gradients, optimize_step
+                   W2_gradients, optimize_step, summary_op
+
+
+    def calc_gradient(self, ep_states, ep_fake_labels, ep_discounted_rewards):
+        gradients, summary = self.sess.run([self.gradient_wrt_params, self.summary_op2],
+                             feed_dict={self.input_states: ep_states,
+                                        self.ep_fake_action_labels: ep_fake_labels,
+                                        self.reward_signal: ep_discounted_rewards})
+
+        return gradients, summary
+
+    def run_optimization_step(self, gradient_buffer):
+        self.sess.run(self.optimize_step, feed_dict={self.W1_gradients: gradient_buffer[0],
+                                                     self.W2_gradients: gradient_buffer[1]})
 
 
 
@@ -386,17 +396,14 @@ def run_episodes(policy, sess, batch_size, hparam):
         # print("max reward", max_reward)
         # total_rewards.append(discounted_rewards.sum())
 
-        gradients = sess.run(policy.actor.gradient_wrt_params,
-                             feed_dict={policy.actor.input_states: ep_states,
-                                        policy.actor.ep_fake_action_labels: ep_fake_labels,
-                                        policy.actor.reward_signal: ep_discounted_rewards})
+        gradients, summary = policy.actor.calc_gradient(ep_states, ep_fake_labels, ep_discounted_rewards)
+        summaries.append(summary)
         for ix, grad in enumerate(gradients):
             gradient_buffer[ix] += grad  # gradients add onto themselves, variances smooth out
 
         # If we have completed enough episodes, then update the policy network with our gradients.
         if episode_i % batch_size == 0:
-            sess.run(policy.actor.optimize_step, feed_dict={policy.actor.W1_gradients: gradient_buffer[0],
-                                                            policy.actor.W2_gradients: gradient_buffer[1]})
+            policy.actor.run_optimization_step(gradient_buffer)
             # after updating, reset gradient buffer for next batch
             for ix, grad in enumerate(gradient_buffer):
                 gradient_buffer[ix] = np.zeros_like(grad)
