@@ -22,13 +22,10 @@ ACTION_SPACE = [1, 0]  # it is important actions are in this order due to how we
 
 N_EPISODES = 1000
 MAX_EP_STEPS = 200  # from CartPole env
-# ACTOR_LEARNING_RATE = 0.0001
-# CRITIC_LEARNING_RATE = 0.0001
 # discount factor
 # the relevant window into the future is about 10 timesteps. (1 *0.7)^10 shrinks to 3% after 10 timesteps.
 DISCOUNT_FACTOR = 0.99  # aka gamma
-# REPLAY_SIZE = 10000 # experience replay buffer size
-BATCH_SIZE = 5 # size of minibatch
+BATCH_SIZE = 5  # size of minibatch
 
 # https://www.youtube.com/watch?v=oPGVsoBonLM
 # policy gradient goal: maximize E[Reward|policy*]
@@ -337,156 +334,153 @@ class ActorNetwork(object):
 #         return action_gradient
 
 
-def run_episodes(learning_rate, n_neurons, use_two_fc, use_dropout, hparam):
+def run_episodes(policy, sess, hparam):
     """runs all the episodes"""
-    tf.reset_default_graph()
-    with tf.Session() as sess:
-        policies = {'random': RandomPolicy, 'contrarian': ContrarianPolicy, 'policy_gradient': PolicyGradient}
-        policy = policies['policy_gradient'](learning_rate, n_neurons, use_two_fc, use_dropout, sess=sess)
-        sess.run(tf.global_variables_initializer())
 
-        env = gym.make(ENV_NAME)
-        env = gym.wrappers.Monitor(env, VIDEO_DIR+hparam, force=True)
-        RENDER_ENV = False
+    sess.run(tf.global_variables_initializer())
 
-        global writer
-        writer = tf.summary.FileWriter(TENSORBOARD_RESULTS_DIR + hparam, sess.graph)
-        summary_ops, summary_vars = build_summaries()
+    env = gym.make(ENV_NAME)
+    env = gym.wrappers.Monitor(env, VIDEO_DIR+hparam, force=True)
+    RENDER_ENV = False
 
-        global episode_i
-        episode_i = 1
-        batch_reward_sum = 0
+    global writer
+    writer = tf.summary.FileWriter(TENSORBOARD_RESULTS_DIR + hparam, sess.graph)
+    summary_ops, summary_vars = build_summaries()
 
-        gradBuffer = sess.run(policy.actor.trainable_net_params)
-        for ix, grad in enumerate(gradBuffer):
-            gradBuffer[ix] = np.zeros_like(grad)
+    global episode_i
+    episode_i = 1
+    batch_reward_sum = 0
 
-        while episode_i <= N_EPISODES:
-            # print("starting ep", episode_i)
-            done = False
+    gradBuffer = sess.run(policy.actor.trainable_net_params)
+    for ix, grad in enumerate(gradBuffer):
+        gradBuffer[ix] = np.zeros_like(grad)
 
-            # fixme f action labels
-            states, actions, action_probabilities, fake_action_labels, rewards = [], [], [], [], []
-            summaries = []
+    while episode_i <= N_EPISODES:
+        # print("starting ep", episode_i)
+        done = False
 
-            env_state = env.reset()
+        # fixme f action labels
+        states, actions, action_probabilities, fake_action_labels, rewards = [], [], [], [], []
+        summaries = []
 
-            while not done:  # ep not finished
-                # only render if we're close to solving
-                if batch_reward_sum / BATCH_SIZE >= 199 or RENDER_ENV is True:
-                    env.render()
-                    RENDER_ENV = True
+        env_state = env.reset()
 
-                current_state = np.reshape(env_state, [1, STATE_DIM])
+        while not done:  # ep not finished
+            # only render if we're close to solving
+            if batch_reward_sum / BATCH_SIZE >= 199 or RENDER_ENV is True:
+                env.render()
+                RENDER_ENV = True
 
-                action_prob, summary = policy.calc_action_probabilities(current_state)  # this is now just one probability
-                summaries.append(summary)
-                action_probabilities.append(action_prob)
-                # print(action_probabilities)
-                # action = policy.choose_action(action_prob)
-                action = 1 if np.random.uniform() < action_prob else 0
-                actions.append(action)
+            current_state = np.reshape(env_state, [1, STATE_DIM])
 
-                fake_label = 1 if action == 0 else 0  # a "fake label"  todo understand
-                fake_action_labels.append(fake_label)
+            action_prob, summary = policy.calc_action_probabilities(current_state)  # this is now just one probability
+            summaries.append(summary)
+            action_probabilities.append(action_prob)
+            # print(action_probabilities)
+            # action = policy.choose_action(action_prob)
+            action = 1 if np.random.uniform() < action_prob else 0
+            actions.append(action)
 
-                states.append(current_state)  # for some reason putting this early breaks training
-                                              # this adds state from previous loop, so we
-                     # dont have to worry about handling last timestep
-                env_state, reward, done, info = env.step(action)
-                # print("reward", reward)
-                reward = -1. if done else reward  # change final reward to negative
-                rewards.append(reward)
-                batch_reward_sum += reward
+            fake_label = 1 if action == 0 else 0  # a "fake label"  todo understand
+            fake_action_labels.append(fake_label)
 
-                # print("future state ", np.shape(future_state))
+            states.append(current_state)  # for some reason putting this early breaks training
+                                          # this adds state from previous loop, so we
+                 # dont have to worry about handling last timestep
+            env_state, reward, done, info = env.step(action)
+            # print("reward", reward)
+            reward = -1. if done else reward  # change final reward to negative
+            rewards.append(reward)
+            batch_reward_sum += reward
 
-                #  custom reward function to manually promote low thetas and x around 0
-                # x, theta = future_state
-                # low_theta_bonus = -100. * (theta ** 2.) + 1.  # reward of 1 at 0 rads, reward of 0 at +- 0.1 rad/6 deg)
-                # # center_pos_bonus = -1 * abs(0.5 * x) + 1  # bonus of 1.0 at x=0, goes down to 0 as x approaches edge
-                # reward += low_theta_bonus
+            # print("future state ", np.shape(future_state))
 
-                # losses = policy.actor.perceive(current_state, action, reward, done)
+            #  custom reward function to manually promote low thetas and x around 0
+            # x, theta = future_state
+            # low_theta_bonus = -100. * (theta ** 2.) + 1.  # reward of 1 at 0 rads, reward of 0 at +- 0.1 rad/6 deg)
+            # # center_pos_bonus = -1 * abs(0.5 * x) + 1  # bonus of 1.0 at x=0, goes down to 0 as x approaches edge
+            # reward += low_theta_bonus
 
-                current_state = env_state
+            # losses = policy.actor.perceive(current_state, action, reward, done)
 
-            # this block executes after episode is done
-            episode_i += 1
-            # episode_length = last_timestep_i + 1
-            # total_times.append(total_time)
-            # stack together all inputs, hidden states, action gradients, and rewards for this episode
-            ep_states = np.vstack(states)
-            ep_fake_labels = np.vstack(fake_action_labels)
-            ep_rewards = np.vstack(rewards)
-            ep_action_probs = action_probabilities
+            current_state = env_state
 
-            ep_discounted_rewards = calc_discounted_rewards(ep_rewards)
-            # print("dr", discounted_rewards)
+        # this block executes after episode is done
+        episode_i += 1
+        # episode_length = last_timestep_i + 1
+        # total_times.append(total_time)
+        # stack together all inputs, hidden states, action gradients, and rewards for this episode
+        ep_states = np.vstack(states)
+        ep_fake_labels = np.vstack(fake_action_labels)
+        ep_rewards = np.vstack(rewards)
+        ep_action_probs = action_probabilities
 
-            # make our env observations into correct tensor shapes
-            # tensor_lengths = len(actions)
-            # actions = np.reshape(actions, (tensor_lengths, 1))
-            # states = np.reshape(states, (tensor_lengths, STATE_DIM))
-            # action_probabilities = np.reshape(action_probabilities, (tensor_lengths, ACTION_DIM))
-            # discounted_rewards = np.reshape(discounted_rewards, (tensor_lengths, 1))
-            # print("drshape", np.shape(discounted_rewards))
+        ep_discounted_rewards = calc_discounted_rewards(ep_rewards)
+        # print("dr", discounted_rewards)
 
-            # update policy
-            # losses = policy.actor.update_policy(states, actions, probability_timeline, discounted_rewards)
+        # make our env observations into correct tensor shapes
+        # tensor_lengths = len(actions)
+        # actions = np.reshape(actions, (tensor_lengths, 1))
+        # states = np.reshape(states, (tensor_lengths, STATE_DIM))
+        # action_probabilities = np.reshape(action_probabilities, (tensor_lengths, ACTION_DIM))
+        # discounted_rewards = np.reshape(discounted_rewards, (tensor_lengths, 1))
+        # print("drshape", np.shape(discounted_rewards))
 
-            # max_reward = np.max(losses)
-            # print("max reward", max_reward)
-            # total_rewards.append(discounted_rewards.sum())
+        # update policy
+        # losses = policy.actor.update_policy(states, actions, probability_timeline, discounted_rewards)
 
-            gradients = sess.run(policy.actor.gradient_wrt_params, feed_dict={policy.actor.input_states: ep_states, policy.actor.ep_fake_action_labels: ep_fake_labels,
-                                                                              policy.actor.reward_signal: ep_discounted_rewards})
-            for ix, grad in enumerate(gradients):
-                gradBuffer[ix] += grad  # gradients add onto themselves, variances smooth out
+        # max_reward = np.max(losses)
+        # print("max reward", max_reward)
+        # total_rewards.append(discounted_rewards.sum())
 
-            # If we have completed enough episodes, then update the policy network with our gradients.
-            if episode_i % BATCH_SIZE == 0:
-                sess.run(policy.actor.optimize_step, feed_dict={policy.actor.W1Grad: gradBuffer[0], policy.actor.W2Grad: gradBuffer[1]})
-                # after updating, reset gradient buffer for next batch
-                for ix, grad in enumerate(gradBuffer):
-                    gradBuffer[ix] = np.zeros_like(grad)
+        gradients = sess.run(policy.actor.gradient_wrt_params, feed_dict={policy.actor.input_states: ep_states, policy.actor.ep_fake_action_labels: ep_fake_labels,
+                                                                          policy.actor.reward_signal: ep_discounted_rewards})
+        for ix, grad in enumerate(gradients):
+            gradBuffer[ix] += grad  # gradients add onto themselves, variances smooth out
 
-                # Give a summary of how well our network is doing for each batch of episodes.
-                print('E %i Average reward for episode in last batch: %1f' % (episode_i,
-                batch_reward_sum / BATCH_SIZE))  # , running_reward / batch_size))
+        # If we have completed enough episodes, then update the policy network with our gradients.
+        if episode_i % BATCH_SIZE == 0:
+            sess.run(policy.actor.optimize_step, feed_dict={policy.actor.W1Grad: gradBuffer[0], policy.actor.W2Grad: gradBuffer[1]})
+            # after updating, reset gradient buffer for next batch
+            for ix, grad in enumerate(gradBuffer):
+                gradBuffer[ix] = np.zeros_like(grad)
 
-                if batch_reward_sum / BATCH_SIZE > 200:
-                    print("Task solved in", episode_i, 'episodes!')
-                    break
+            # Give a summary of how well our network is doing for each batch of episodes.
+            print('E %i Average reward for episode in last batch: %1f' % (episode_i,
+            batch_reward_sum / BATCH_SIZE))  # , running_reward / batch_size))
 
-                batch_reward_sum = 0  # time for a new batch
+            if batch_reward_sum / BATCH_SIZE > 200:
+                print("Task solved in", episode_i, 'episodes!')
+                break
 
-            # let's look at how our reward belief network is doing
-            # reward_mse = np.mean((discounted_rewards - policy.predict_rewards(states, actions))**2)
-            # reward_mses.append(reward_mse)
-            # TODO add gradients to summary
-            # print("sdr", np.shape(discounted_rewards))
-            # summary_str = sess.run(summary_ops, feed_dict={
-            #     summary_vars[0]: episode_length,
-            #     summary_vars[1]: ep_discounted_rewards.sum(),
-            #     summary_vars[2]: ep_discounted_rewards.mean(),
-            #     summary_vars[3]: ep_discounted_rewards
-            # })
-            # summaries.append(summary_str)
-            # for s in summaries:
-            #     writer.add_summary(s, episode_i)
-            writer.flush()
+            batch_reward_sum = 0  # time for a new batch
 
-            # print("episode {} | total reward {} | avg reward {} | time alive {}".format(
-            #     episode_i,
-            #     discounted_rewards.sum(),
-            #     discounted_rewards.mean(),
-            #     episode_length
-            # ))
+        # let's look at how our reward belief network is doing
+        # reward_mse = np.mean((discounted_rewards - policy.predict_rewards(states, actions))**2)
+        # reward_mses.append(reward_mse)
+        # TODO add gradients to summary
+        # print("sdr", np.shape(discounted_rewards))
+        # summary_str = sess.run(summary_ops, feed_dict={
+        #     summary_vars[0]: episode_length,
+        #     summary_vars[1]: ep_discounted_rewards.sum(),
+        #     summary_vars[2]: ep_discounted_rewards.mean(),
+        #     summary_vars[3]: ep_discounted_rewards
+        # })
+        # summaries.append(summary_str)
+        # for s in summaries:
+        #     writer.add_summary(s, episode_i)
+        writer.flush()
 
-            # TODO save these
+        # print("episode {} | total reward {} | avg reward {} | time alive {}".format(
+        #     episode_i,
+        #     discounted_rewards.sum(),
+        #     discounted_rewards.mean(),
+        #     episode_length
+        # ))
 
-        # return total_times, total_rewards, reward_mses
+        # TODO save these
+
+    # return total_times, total_rewards, reward_mses
 
 
 def calc_discounted_rewards(rewards):
@@ -556,7 +550,13 @@ def main(_):
                     # Construct a hyperparameter string for each one (example: "lr_1E-3,fc=2,conv=2)
                     hparam = make_hparam_string(learning_rate, n_neurons, use_two_fc, use_dropout)
                     print('Starting run for %s' % hparam)
-                    run_episodes(learning_rate, n_neurons, use_two_fc, use_dropout, hparam)
+                    tf.reset_default_graph()
+                    with tf.Session() as sess:
+                        policies = {'random': RandomPolicy, 'contrarian': ContrarianPolicy,
+                                    'policy_gradient': PolicyGradient}
+                        policy = policies['policy_gradient'](learning_rate, n_neurons, use_two_fc, use_dropout, sess=sess)
+
+                        run_episodes(policy, sess, hparam)
         # total_times, total_rewards, reward_mses = train(sess, env, policy)
         # plot_metadata(total_times, total_rewards, reward_mses)
 
