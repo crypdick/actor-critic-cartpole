@@ -11,7 +11,6 @@ os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"  # see issue #152
 os.environ["CUDA_VISIBLE_DEVICES"] = "1"  # use correct GPU
 
 ENV_NAME = 'CartPole-v0'
-RENDER_ENV = False
 VIDEO_DIR = './results/videos/'
 TENSORBOARD_RESULTS_DIR = './results/tensorboard/with_buffer1/'
 
@@ -340,8 +339,8 @@ def run_episodes(policy, sess, hparam):
     sess.run(tf.global_variables_initializer())
 
     env = gym.make(ENV_NAME)
-    env = gym.wrappers.Monitor(env, VIDEO_DIR+hparam, force=True)
-    RENDER_ENV = False
+    # env = gym.wrappers.Monitor(env, VIDEO_DIR+hparam, force=True)
+    render_env = False
 
     global writer
     writer = tf.summary.FileWriter(TENSORBOARD_RESULTS_DIR + hparam, sess.graph)
@@ -367,9 +366,9 @@ def run_episodes(policy, sess, hparam):
 
         while not done:  # ep not finished
             # only render if we're close to solving
-            if batch_reward_sum / BATCH_SIZE >= 199 or RENDER_ENV is True:
+            if batch_reward_sum / BATCH_SIZE >= 199 or render_env is True:
                 env.render()
-                RENDER_ENV = True
+                render_env = True
 
             current_state = np.reshape(env_state, [1, STATE_DIM])
 
