@@ -146,15 +146,10 @@ class ActorNetwork(object):
                                                 weights_init='xavier',
                                                 name='fc1')
             tflearn.summaries.add_trainable_vars_summary([actor_net.W], name_prefix='fc1')
-            # if self.use_two_fc:
-            #     actor_net = tflearn.fully_connected(actor_net, name='fc2')
-            # if self.use_dropout:
-            #     actor_net = tflearn.dropout(actor_net, 0.5, name='actor_dropout')
-            # we output a single number which corresponds to our score
             actor_net = tflearn.fully_connected(actor_net, ACTION_DIM, weights_init='xavier',
                                                 # bias=True, bias_init='truncated_normal',
                                                 name='score')
-            tflearn.summaries.add_trainable_vars_summary([actor_net.W, actor_net.b], name_prefix='fc4')
+            tflearn.summaries.add_trainable_vars_summary([actor_net.W], name_prefix='fc4')
             # output probabilities
             actor_net = tflearn.activation(actor_net, activation='sigmoid', name='probability')
             tflearn.summaries.add_activations_summary([actor_net], name_prefix='sigmoid')
