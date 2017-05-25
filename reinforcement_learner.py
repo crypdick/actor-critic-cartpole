@@ -350,9 +350,10 @@ def run_episodes(policy, sess, hparam):
     episode_i = 1
     batch_reward_sum = 0
 
-    gradBuffer = sess.run(policy.actor.trainable_net_params)
-    for ix, grad in enumerate(gradBuffer):
-        gradBuffer[ix] = np.zeros_like(grad)
+    # make a gradient array w same shape as params, fill with zeros
+    gradient_buffer = sess.run(policy.actor.trainable_net_params)
+    for ix, grad in enumerate(gradient_buffer):
+        gradient_buffer[ix] = np.zeros_like(grad)
 
     while episode_i <= N_EPISODES:
         # print("starting ep", episode_i)
@@ -372,13 +373,14 @@ def run_episodes(policy, sess, hparam):
 
             current_state = np.reshape(env_state, [1, STATE_DIM])
 
-            action_prob, summary = policy.calc_action_probabilities(current_state)  # this is now just one probability
-            summaries.append(summary)
+            action_prob = sess.run(policy.actor.action_probability_op,
+                                            feed_dict={policy.actor.input_states: current_state})  # this is now just one probability
+            # summaries.append(summary)
             action_probabilities.append(action_prob)
             # print(action_probabilities)
             # action = policy.choose_action(action_prob)
             action = 1 if np.random.uniform() < action_prob else 0
-            actions.append(action)
+            # actions.append(action)
 
             fake_label = 1 if action == 0 else 0  # a "fake label"  todo understand
             fake_action_labels.append(fake_label)
@@ -388,7 +390,7 @@ def run_episodes(policy, sess, hparam):
                  # dont have to worry about handling last timestep
             env_state, reward, done, info = env.step(action)
             # print("reward", reward)
-            reward = -1. if done else reward  # change final reward to negative
+            # reward = -1. if done else reward  # change final reward to negative
             rewards.append(reward)
             batch_reward_sum += reward
 
@@ -402,7 +404,7 @@ def run_episodes(policy, sess, hparam):
 
             # losses = policy.actor.perceive(current_state, action, reward, done)
 
-            current_state = env_state
+            # current_state = env_state
 
         # this block executes after episode is done
         episode_i += 1
@@ -432,17 +434,18 @@ def run_episodes(policy, sess, hparam):
         # print("max reward", max_reward)
         # total_rewards.append(discounted_rewards.sum())
 
-        gradients = sess.run(policy.actor.gradient_wrt_params, feed_dict={policy.actor.input_states: ep_states, policy.actor.ep_fake_action_labels: ep_fake_labels,
+        gradients = sess.run(policy.actor.gradient_wrt_params,
+            feed_dict={policy.actor.input_states: ep_states, policy.actor.ep_fake_action_labels: ep_fake_labels,
                                                                           policy.actor.reward_signal: ep_discounted_rewards})
         for ix, grad in enumerate(gradients):
-            gradBuffer[ix] += grad  # gradients add onto themselves, variances smooth out
+            gradient_buffer[ix] += grad  # gradients add onto themselves, variances smooth out
 
         # If we have completed enough episodes, then update the policy network with our gradients.
         if episode_i % BATCH_SIZE == 0:
-            sess.run(policy.actor.optimize_step, feed_dict={policy.actor.W1Grad: gradBuffer[0], policy.actor.W2Grad: gradBuffer[1]})
+            sess.run(policy.actor.optimize_step, feed_dict={policy.actor.W1Grad: gradient_buffer[0], policy.actor.W2Grad: gradient_buffer[1]})
             # after updating, reset gradient buffer for next batch
-            for ix, grad in enumerate(gradBuffer):
-                gradBuffer[ix] = np.zeros_like(grad)
+            for ix, grad in enumerate(gradient_buffer):
+                gradient_buffer[ix] = np.zeros_like(grad)
 
             # Give a summary of how well our network is doing for each batch of episodes.
             print('E %i Average reward for episode in last batch: %1f' % (episode_i,
@@ -468,7 +471,7 @@ def run_episodes(policy, sess, hparam):
         # summaries.append(summary_str)
         # for s in summaries:
         #     writer.add_summary(s, episode_i)
-        writer.flush()
+        # writer.flush()
 
         # print("episode {} | total reward {} | avg reward {} | time alive {}".format(
         #     episode_i,
@@ -486,12 +489,11 @@ def calc_discounted_rewards(rewards):
     """rewards are reward at that specific timestep plus discounted value of future rewards in that trajectory"""
     # print("r", rewards)
     discounted_rewards = np.zeros_like(rewards)
-
     running_rewards = 0.
     for t in reversed(range(0, rewards.size)):  # step backwards summary_varsin time from the end of the episode
         # print(i)
-        discounted_rewards[t] = rewards[t] + DISCOUNT_FACTOR * running_rewards
-        running_rewards += discounted_rewards[t]
+        running_rewards = rewards[t] + DISCOUNT_FACTOR * running_rewards
+        discounted_rewards[t] += running_rewards
     # feature scaling/normalizing using standardization. reward vec will always have 0 mean and variance 1
     # otherwise, early rewards become astronomical as the runninprint(g reward gets added to each previous ts
     # scaled rewards are much smaller, which makes it more stable for the neural network to approximate.
