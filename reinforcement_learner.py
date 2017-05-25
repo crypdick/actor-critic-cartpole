@@ -11,15 +11,15 @@ os.environ["CUDA_VISIBLE_DEVICES"] = "1"  # use correct GPU
 
 ENV_NAME = 'CartPole-v0'
 VIDEO_DIR = './results/videos/'
-TENSORBOARD_RESULTS_DIR = './results/tensorboard/with_grad_buffer1/'
+TENSORBOARD_RESULTS_DIR = './results/tensorboard/with_grad_buffer4/'
 
 STATE_DIM = 4
 ACTION_DIM = 1
 ACTION_BOUND = 1  # 0 to 1
 ACTION_SPACE = [1, 0]  # it is important actions are in this order due to how we set up out log-probability func
 
-N_EPISODES = 2000
-# MAX_EP_STEPS = 200  # from CartPole env
+N_EPISODES = 100
+
 # discount factor
 # the relevant window into the future is about 10 timesteps. (1 *0.7)^10 shrinks to 3% after 10 timesteps.
 DISCOUNT_FACTOR = 0.99  # aka gamma
@@ -400,8 +400,8 @@ def run_episodes(policy, sess, batch_size, hparam):
                 gradient_buffer[ix] = np.zeros_like(grad)
 
             # Give a summary of how well our network is doing for each batch of episodes.
-            print("E {:d} Average reward for episode in last batch: {:.1f}".format(episode_i,
-                                                                                   batch_reward_sum / batch_size))
+            # print("E {:d} Average reward for episode in last batch: {:.1f}".format(episode_i,
+            #                                                                        batch_reward_sum / batch_size))
 
             if batch_reward_sum / batch_size > 200:
                 print("Task solved in", episode_i, 'episodes!')
@@ -463,27 +463,28 @@ def build_summaries():
 
 def main(_):
     """parameter sweep to find the best model"""
-    for learning_rate in [1e-2, 1e-4, 1e-5]:
-        for use_two_fc in [False]:
-            for n_neurons in [10, 20, 40]:
-                for use_dropout in [False]:  # dropout always made things worse
-                    for batch_size in [5, 10, 20]:
-                        # Construct a hyperparameter string for each one (example: "lr_1E-3,fc=2,conv=2)
-                        hparam = make_hparam_string(learning_rate, n_neurons, batch_size)
-                        print('Starting run for %s' % hparam)
-                        tf.reset_default_graph()
-                        with tf.Session() as sess:
-                            policies = {'random': RandomPolicy, 'contrarian': ContrarianPolicy,
-                                        'policy_gradient': PolicyGradient}
-                            policy = policies['policy_gradient'](learning_rate, n_neurons, sess=sess)
+    for i in range(5):  # repeat everything a few times to get statistical to get a sense of how stable models are
+        for learning_rate in [1e-1]:#np.linspace(1e-1, 1e-2, 4):
+            for use_two_fc in [False]:
+                for n_neurons in np.linspace(100,130, 4, dtype=np.int):
+                    for use_dropout in [False]:  # dropout always made things worse
+                        for batch_size in [1]:
+                            # Construct a hyperparameter string for each one (example: "lr_1E-3,fc=2,conv=2)
+                            hparam = make_hparam_string(learning_rate, n_neurons, batch_size)
+                            print('Starting run for %s' % hparam)
+                            tf.reset_default_graph()
+                            with tf.Session() as sess:
+                                policies = {'random': RandomPolicy, 'contrarian': ContrarianPolicy,
+                                            'policy_gradient': PolicyGradient}
+                                policy = policies['policy_gradient'](learning_rate, n_neurons, sess=sess)
 
-                            run_episodes(policy, sess, batch_size, hparam)
-                            # total_times, total_rewards, reward_mses = train(sess, env, policy)
-                            # plot_metadata(total_times, total_rewards, reward_mses)
+                                run_episodes(policy, sess, batch_size, hparam)
+                                # total_times, total_rewards, reward_mses = train(sess, env, policy)
+                                # plot_metadata(total_times, total_rewards, reward_mses)
 
-                            # TODO save progress to resume learning weights
+                                # TODO save progress to resume learning weights
 
-                            # gym.upload('/tmp/cartpole-experiment-1', api_key='ZZZ')
+                                # gym.upload('/tmp/cartpole-experiment-1', api_key='ZZZ')
 
 
 if __name__ == '__main__':
