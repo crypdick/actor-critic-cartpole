@@ -297,7 +297,7 @@ def run_episodes(policy, sess, batch_size, hparam):
     summary_ops, summary_vars = build_summaries()
 
     episode_i = 1
-    batch_reward_sum = 0
+    batch_reward_sum = 0.
 
     # make a gradient array w same shape as params, fill with zeros
     gradient_buffer = policy.get_trainable_params()
