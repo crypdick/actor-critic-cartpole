@@ -109,7 +109,6 @@ class PolicyGradient(Policy):
         super().__init__(sess)
 
         self.actor = ActorNetwork(self.sess, *args)
-        # self.critic = CriticNetwork(self.sess, self.actor.n_trainable_params)
 
     def calc_action_probabilities(self, current_state):
         action_probabilities, summaries = self.sess.run([self.actor.action_probability_op, self.actor.summary_op1],
@@ -223,7 +222,6 @@ def run_episodes(policy, sess, batch_size, hparam):
     while episode_i <= N_EPISODES:
         done = False
 
-        # fixme f action labels
         states, actions, action_probabilities, fake_action_labels, rewards = [], [], [], [], []
         summaries = []
 
@@ -248,9 +246,10 @@ def run_episodes(policy, sess, batch_size, hparam):
             fake_label = 1 if action == 0 else 0  # a "fake label"
             fake_action_labels.append(fake_label)
 
-            states.append(current_state)  # for some reason putting this early breaks training
-            # this adds state from previous loop, so we
-            # dont have to worry about handling last timestep
+            # for some reason putting this early breaks training
+            # this adds state from previous loop, so we dont have to worry about handling final timestep
+            states.append(current_state)
+
             env_state, reward, done, info = env.step(action)
             rewards.append(reward)
             batch_reward_sum += reward
@@ -307,7 +306,7 @@ def run_episodes(policy, sess, batch_size, hparam):
                 print("Task solved in", episode_i, 'episodes!')
                 break
 
-            batch_reward_sum = 0  # time for a new batch
+            batch_reward_sum = 0  # reset for next batch
 
 
 def calc_discounted_rewards(rewards):
@@ -315,7 +314,7 @@ def calc_discounted_rewards(rewards):
     discounted_rewards = np.zeros_like(rewards)
     running_rewards = 0.
     for t in reversed(range(0, rewards.size)):  # step backwards in time from the end of the episode
-        running_rewards = rewards[t] + DISCOUNT_FACTOR * running_rewards  # fixme this seems wrong
+        running_rewards = rewards[t] + DISCOUNT_FACTOR * running_rewards
         discounted_rewards[t] += running_rewards
     # feature scaling/normalizing using standardization. reward vec will always have 0 mean and variance 1
     # otherwise, early rewards become astronomical as the running reward gets added to each previous ts
