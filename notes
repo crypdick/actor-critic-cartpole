@@ -1,0 +1,6 @@
+was not training. figured out that Relu units can die during steep gradients, causing them never to train anymore. I was trying to train to aggressively and they
+
+I will take Karpathy's advice and use Relu units over sigmoid and tanh activations.
+https://cs231n.github.io/neural-networks-1/#nn
+
+
