@@ -399,7 +399,7 @@ def calc_discounted_rewards(rewards):
     discounted_rewards = np.zeros_like(rewards)
     running_rewards = 0.
     for t in reversed(range(0, rewards.size)):  # step backwards in time from the end of the episode
-        running_rewards = rewards[t] + DISCOUNT_FACTOR * running_rewards  # fixme this seems wrong
+        running_rewards = rewards[t] + DISCOUNT_FACTOR * running_rewards
         discounted_rewards[t] += running_rewards
     # feature scaling/normalizing using standardization. reward vec will always have 0 mean and variance 1
     # otherwise, early rewards become astronomical as the running reward gets added to each previous ts
