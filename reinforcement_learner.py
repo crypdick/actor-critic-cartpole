@@ -11,14 +11,14 @@ os.environ["CUDA_VISIBLE_DEVICES"] = "1"  # use correct GPU
 
 ENV_NAME = 'CartPole-v0'
 VIDEO_DIR = './results/videos/'
-TENSORBOARD_RESULTS_DIR_PREFIX = './results/tensorboard/with_gradient_buffers5/'
+TENSORBOARD_RESULTS_DIR_PREFIX = './results/tensorboard/b/'
 
 STATE_DIM = 4
 ACTION_DIM = 1
 ACTION_BOUND = 1  # 0 to 1
 ACTION_SPACE = [1, 0]  # it is important actions are in this order due to how we set up out log-probability func
 
-N_EPISODES = 100
+N_EPISODES = 1000
 
 # discount factor
 # the relevant window into the future is about 10 timesteps. (1 *0.7)^10 shrinks to 3% after 10 timesteps.
@@ -94,7 +94,7 @@ class ContrarianPolicy(Policy):
     def calc_action_probabilities(self, state):
         state = state[0]  # list in a list
         theta = state[1]
-        if theta >= 0.:
+        if theta >= 0.:  # action space is flipped for the policy gradient; first index is right, second index is left
             probabilities = np.array([0., 1.])
         else:
             probabilities = np.array([1., 0.])
@@ -129,22 +129,7 @@ class PolicyGradient(Policy):
 
     def run_optimization_step(self, gradient_buffer):
         self.sess.run(self.actor.optimize_step, feed_dict={self.actor.W1_gradients: gradient_buffer[0],
-                                                     self.actor.W2_gradients: gradient_buffer[1]})
-
-        # def predict_rewards(self, observed_states, observed_actions):
-        #     """in case we want to peek at our reward predictions"""
-        #     predicted_rewards = self.sess.run(self.critic.reward_predictor, feed_dict={
-        #         self.critic.input_states: observed_states,
-        #         self.critic.input_actions: observed_actions
-        #     })
-        #     return predicted_rewards
-        #
-        # # def update_policy(self, observed_states, observed_actions, action_probability_timeline, observed_rewards):
-        # #     """when episode concludes, lets update our actors and critics"""
-        #     # print(np.shape(observed_states), np.shape(observed_actions), np.shape(observed_rewards))
-        #     # self.critic.optimize_critic_network(observed_states, observed_actions, observed_rewards)
-        #     # gradient_wrt_actions = self.critic.calc_action_gradient(observed_states, observed_actions)
-        #     # self.actor.optimize_actor_net(observed_states, gradient_wrt_actions)
+                                                           self.actor.W2_gradients: gradient_buffer[1]})
 
 
 class ActorNetwork(object):
@@ -320,7 +305,6 @@ def run_episodes(policy, sess, batch_size, hparam):
         gradient_buffer[ix] = np.zeros_like(grad)
 
     while episode_i <= N_EPISODES:
-        # print("starting ep", episode_i)
         done = False
 
         # fixme f action labels
@@ -331,9 +315,9 @@ def run_episodes(policy, sess, batch_size, hparam):
 
         while not done:  # ep not finished
             # only render if we're close to solving
-            # if batch_reward_sum / batch_size >= 199 or render_env is True:
-            #     env.render()
-            #     render_env = True
+            if batch_reward_sum / batch_size >= 199 or render_env is True:
+                env.render()
+                render_env = True
 
             current_state = np.reshape(env_state, [1, STATE_DIM])
 
@@ -345,19 +329,15 @@ def run_episodes(policy, sess, batch_size, hparam):
             action = 1 if np.random.uniform() < action_prob else 0
             # actions.append(action)
 
-            fake_label = 1 if action == 0 else 0  # a "fake label"  todo understand
+            fake_label = 1 if action == 0 else 0  # a "fake label"
             fake_action_labels.append(fake_label)
 
             states.append(current_state)  # for some reason putting this early breaks training
             # this adds state from previous loop, so we
             # dont have to worry about handling last timestep
             env_state, reward, done, info = env.step(action)
-            # print("reward", reward)
-            # reward = -1. if done else reward  # change final reward to negative
             rewards.append(reward)
             batch_reward_sum += reward
-
-            # print("future state ", np.shape(future_state))
 
             #  custom reward function to manually promote low thetas and x around 0
             # x, theta = future_state
@@ -365,19 +345,12 @@ def run_episodes(policy, sess, batch_size, hparam):
             # # center_pos_bonus = -1 * abs(0.5 * x) + 1  # bonus of 1.0 at x=0, goes down to 0 as x approaches edge
             # reward += low_theta_bonus
 
-            # losses = policy.actor.perceive(current_state, action, reward, done)
-
-            # current_state = env_state
-
         # this block executes after episode is done
         episode_i += 1
-        # episode_length = last_timestep_i + 1
-        # total_times.append(total_time)
         # stack together all inputs, hidden states, action gradients, and rewards for this episode
         ep_states = np.vstack(states)
         ep_fake_labels = np.vstack(fake_action_labels)
         ep_rewards = np.vstack(rewards)
-        # ep_action_probs = action_probabilities
 
         ep_discounted_rewards = calc_discounted_rewards(ep_rewards)
 
@@ -411,8 +384,8 @@ def run_episodes(policy, sess, batch_size, hparam):
                 gradient_buffer[ix] = np.zeros_like(grad)
 
             # Give a summary of how well our network is doing for each batch of episodes.
-            # print("E {:d} Average reward for episode in last batch: {:.1f}".format(episode_i,
-            #                                                                        batch_reward_sum / batch_size))
+            print("E {:d} Average reward for episode in last batch: {:.1f}".format(episode_i,
+                                                                                   batch_reward_sum / batch_size))
 
             if batch_reward_sum / batch_size > 200:
                 print("Task solved in", episode_i, 'episodes!')
@@ -429,7 +402,7 @@ def calc_discounted_rewards(rewards):
         running_rewards = rewards[t] + DISCOUNT_FACTOR * running_rewards  # fixme this seems wrong
         discounted_rewards[t] += running_rewards
     # feature scaling/normalizing using standardization. reward vec will always have 0 mean and variance 1
-    # otherwise, early rewards become astronomical as the runninprint(g reward gets added to each previous ts
+    # otherwise, early rewards become astronomical as the running reward gets added to each previous ts
     # scaled rewards are much smaller, which makes it more stable for the neural network to approximate.
     # since we subtract the mean, we also see that the lat
     discounted_rewards -= discounted_rewards.mean()
@@ -458,12 +431,12 @@ def build_summaries():
 
 def main(_):
     """parameter sweep to find the best model"""
-    for i in range(10):  # repeat everything a few times to get statistical to get a sense of how stable models are
+    for i in range(1):  # repeat everything a few times to get statistical to get a sense of how stable models are
         global TENSORBOARD_RESULTS_DIR
         TENSORBOARD_RESULTS_DIR = TENSORBOARD_RESULTS_DIR_PREFIX + "{}/".format(i)  # put each iteration in a different folder for tensorboard
-        for learning_rate in [1e-1]:#np.linspace(1e-1, 1e-2, 4):
+        for learning_rate in [1e-1]:#np.linspace(1e-1, 1e-6, 20):
             for use_two_fc in [False]:
-                for n_neurons in [120]:#np.linspace(100,130, 4, dtype=np.int):
+                for n_neurons in [120]:#np.linspace(10,200, 20, dtype=np.int):
                     for use_dropout in [False]:  # dropout always made things worse
                         for batch_size in [1]:
                             # Construct a hyperparameter string for each one (example: "lr_1E-3,fc=2,conv=2)
