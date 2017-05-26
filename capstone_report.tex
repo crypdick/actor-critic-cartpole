@@ -145,7 +145,7 @@ Initially, I created a bonus system to reward states with the pole upright and t
 
 \begin{figure}[htbp]
 \begin{center}
-\includegraphics[scale=0.6]{actor_net.png}
+\includegraphics[scale=0.66]{actor_net.png}
 \caption{Graph of my finalized actor network architecture. Input state is our observed state for that timestep. fc1 is a fully-connected layer with a ReLu activation. Score is a second fully connected layer. Finally, the scores are given to a sigmoid activation layer which outputs a single value between 0 and 1. This is the probability of choosing ``push right" action at that timestep.}
 \label{actor_net}
 \end{center}
@@ -154,49 +154,23 @@ Initially, I created a bonus system to reward states with the pole upright and t
 
 
 
-
-more complicated
-
-less complicated. 
-
-
-everything that used dropout crashed to 10 ts, so I removed that as a param.
-
-new loss function
-
-cross ent
-
-new rewards
-
-experience replay
-
-gradient buffers
-
-softmax of two probabilties --> one probability 
-
-
-overnight run with actor critic
-
-
 \subsection*{Refinement}
 %In this section, you will need to discuss the process of improvement you made upon the algorithms and techniques you used in your implementation. For example, adjusting parameters for certain models to acquire improved solutions would fall under the refinement category. Your initial and final solutions should be reported, as well as any significant intermediate results as necessary. Questions to ask yourself when writing this section:
 %- _Has an initial solution been found and clearly reported?_
 %- _Is the process of improvement clearly documented, such as what techniques were used?_
 %- _Are intermediate and final solutions clearly reported as the process is improved?_
-I finally got a model which trained, but it took 2000 iterations to solve the game.
 
+I had a very hard time getting to the point where any of my models would train. At first, my intuition was to add more nodes and layers to my model and let it train for more iterations in the hopes that a larger network would be able to find a solution to the problem. At one point, I let the actor-critic model train overnight on my GPU with over 200,000 episodes, but it never converged to a solution.
+
+After that, I got rid of the critic and worked on the actor. I tried more layers, fewer layers, adding biases, removing biases, different activation functions, different weight initalizations, different optimizers, dropout layers, different learning rates, and nothing seemed to work.
+
+Finally, I found a policy gradient implementation which solved CartPole on Github. I took it and progressively changed my hyperparameters and network architecture to match theirs. It still did not train. Finally, I found the two lines of code which broke training. One was my weights initialization, which was using truncated normals. As soon as I changed it to an xavier intialization, my model started to train successfully. I was able to reproduce the problem reliably simply by switching the weights initialization back and forth between xavier and truncated normals.
+
+With my model finally training, I started optimizing the parameters and architecture. I decided to try to find the model which solved the game in as few episodes as possible. The original implementation took 2000 episodes to converge. I created a series of nested for loops to do a large parameter sweep of possible models to rule out certain architectures. 
+
+Predictably, I found that the following things slowed down training time: using dropout layers, gradient batches, extra layers, and lower learning rates. As I iteratively reduced the scope of my parameter space scope, my models trained faster and faster, and I could reduce the number of episodes per model. Finally, I found a model which could reliably get a perfect score in less than 30 episodes, and sometimes as low as 13 episodes (discussed in the Model Evaluation section).
 
 Tensorboard was invaluable. It allowed easy comparison across multiple models. By the end, I compared dozens of models before selecting the best one. 
-
-I wanted to see how fast my model could converge to a perfect policy.
-
-However, while these find the game quickly, the combination of a high learning rate and a noisy reward signal results in inconsitent results. Sometimes we get a perfect score in as little as 13 trials, but sometimes it takes over 100 episodes to do so using the same exact model parameters. 
-
-parameter sweep
-
-adding layers
-
-as models got better, reduced number of episodes
 
 
 \section{Results}
@@ -210,48 +184,68 @@ as models got better, reduced number of episodes
 %- _Can results found from the model be trusted?_
 
 \subsubsection*{Random Policy}
-Each episode lasted on average about 
+
+The random policy had a high variance in performance, with episodes lasting between 10 and 40 timesteps (Figure \ref{rand_ep_length}).  The average episode length is approximately 20 timesteps. Likewise, the distribution of thetas has a high spread (Figure \ref{rand_thetas}). The distributions do not change over time, which is expected since this policy does not learn. The clustering of values near zero is expected because the game is instantiated with the pole upright, and because episodes tend to last a very short time.
+
 \begin{figure}[htbp]
 \begin{center}
 \includegraphics[width=\linewidth]{rand_ep_length.png}
-\caption[]{}
+\caption{Average timesteps per episode for random policy. The x-axis represents the episode number and the y-axis is the number of timesteps before the episode ended. The different colors represent different trials. As expected, the agent does not improve over time.}
 \label{rand_ep_length}
 \end{center}
 \end{figure}
- The distribution of thetas 
 
 \begin{figure}[htbp]
 \begin{center}
 \includegraphics[width=\linewidth]{rand_thetas.png}
-\caption{Distribution of thetas for random policy}
-\label{rand_ep_length}
+\caption{Histogram of thetas for random policy. The x-axis represents the angle in radians, with 0 being vertical. The height represents the frequency which that angle was observed. The depth represents the episode number, with histograms near the top being early episodes and the ones at the forefront being the final episodes.}
+\label{rand_thetas}
 \end{center}
 \end{figure}
 
 \subsubsection*{Contrarian Policy}
 
-Each episode lasted on average about 
+The average episode length is approximately 45 timesteps, which is as more than twice as good as taking random actions (Figure \ref{pg_episodes}). As expected, the agent does not improve over time.  Qualitatively, the tails of the theta distributions (Figure \ref{contrarian_thetas}) are slightly smaller than the random agent. The distributions do not change over time, which is expected since this policy does not learn. 
+
 \begin{figure}[htbp]
 \begin{center}
 \includegraphics[width=\linewidth]{contrarian_lengths.png}
-\caption{}
+\caption{Average timesteps per episode for the contrarian policy. The different colors represent different trials. The x-axis represents the episode number and the y-axis is the number of timesteps before the episode ended. }
 \label{contrarian_lengths}
 \end{center}
 \end{figure}
 
-The distribution of thetas 
-
 \begin{figure}[htbp]
 \begin{center}
 \includegraphics[width=\linewidth]{contrarian_thetas.png}
-\caption{Distribution of thetas for contrarian policy}
+\caption{Histogram of thetas for contrarian policy. The x-axis represents the angle in radians, with 0 being vertical. The height represents the frequency which that angle was observed. The depth represents the episode number, with histograms near the top being early episodes and the ones at the forefront being the final episodes.}
 \label{contrarian_thetas}
 \end{center}
 \end{figure}
 
 \subsubsection*{Policy Gradient}
 
-\subsection*{Justification}
+The actor usually plays a perfect game of 200 timesteps within 35 episodes (Figure \ref{pg_episodes}), which is substantially better than the random actor's lifespan of 20 timesteps. Sometimes, it plays a perfect game in as little as 13 episodes. On the other hand, sometimes it takes over 100 episodes to do so using the same exact model parameters (see the dark blue trace).
+
+However, while these find the game quickly, the combination of a high learning rate and a noisy reward signal results in inconsitent results.
+
+\begin{figure}[htbp]
+\begin{center}
+\includegraphics[width=\linewidth]{pg_episodes.png}
+\caption{Episode lengths for the final policy gradient model.  The x-axis represents the episode number and the y-axis is the number of timesteps before the episode ended. The different colors represent different trials.  }
+\label{pg_episodes}
+\end{center}
+\end{figure}
+
+\begin{figure}[htbp]
+\begin{center}
+\includegraphics[width=\linewidth]{pg_thetas.png}
+\caption{Histogram of thetas for policy gradient. The x-axis represents the angle in radians, with 0 being vertical. The height represents the frequency which that angle was observed. The depth represents the episode number, with histograms near the top being early episodes and the ones at the forefront being the final episodes.}
+\label{pg_thetas}
+\end{center}
+\end{figure}
+
+%subsection*{Justification}
 %In this section, your model’s final solution and its results should be compared to the benchmark you established earlier in the project using some type of statistical analysis. You should also justify whether these results and the solution are significant enough to have solved the problem posed in the project. Questions to ask yourself when writing this section:
 %- _Are the final results found stronger than the benchmark result reported earlier?_
 %- _Have you thoroughly analyzed and discussed the final solution?_
@@ -269,29 +263,40 @@ The distribution of thetas
 %
 If I let it run long enough, it lowers in score. That's because the reward function penalizes things near the end, even if doing well. This is good for fast training, but bad once we have converged.
 
-Prone to catastrophic colapse.
+
+I selected a trial where the model failed to train. I looked at the istribution of activations and weights over time, and it was clear that something was wrong (Figure \ref{pg_stuck}). The outputs tended to be zeros or ones, indicating that the units in the network had catastrophically converged to zeros, becoming impossible to change with multiplication. These ``dead models" happened roughly 15\% of the time, which is to be expected with our aggressive learning rate and lack of batching.
+ 
+
+\begin{figure}[htbp]
+\begin{center}
+\includegraphics[width=\linewidth]{pg_stuck.png}
+\caption{Activation over time of the actor network for each episode in the policy gradient. Note, unlike the figures above, these are not histograms-- the values are in chronologically ordered. The x-axis represents the run-time of a given episode, the height represents the output value of the sigmoid function. The depth represents the episode number, with histograms near the top being early episodes and the ones at the forefront being the final episodes. Values of 0 are a correspond to a high probability of pushing the cart to the left, and values near 1 correspond to a high probability of pushing the cart to the right.}
+\label{pg_stuck}
+\end{center}
+\end{figure}
+
 \subsection*{Reflection}
 %In this section, you will summarize the entire end-to-end problem solution and discuss one or two particular aspects of the project you found interesting or difficult. You are expected to reflect on the project as a whole to show that you have a firm understanding of the entire process employed in your work. Questions to ask yourself when writing this section:
 %- _Have you thoroughly summarized the entire process you used for this project?_
 %- _Were there any interesting aspects of the project?_
 %- _Were there any difficult aspects of the project?_
 %- _Does the final model and solution fit your expectations for the problem, and should it be used in a general setting to solve these types of problems?_
-start simple
+If I had to give myself advice, it would be to start with a simple network architecture and build on it. I started with an actor-critic model, which was too ambitious and much harder to diagnose with all the moving parts. 
 
-tensorboard is great
-
-save snapshot after perfect performance
-
-
-
+I wish I would have started using Tensorboard summaries sooner. They proved invaluable in troubleshooting, once I figured out how the summary operations worked.
 
 \subsection*{Improvement}
 %In this section, you will need to provide discussion as to how one aspect of the implementation you designed could be improved. As an example, consider ways your implementation can be made more general, and what would need to be modified. You do not need to make this improvement, but the potential solutions resulting from these changes are considered and compared/contrasted to your current solution. Questions to ask yourself when writing this section:
 %- _Are there further improvements that could be made on the algorithms or techniques you used in this project?_
 %- _Were there algorithms or techniques you researched that you did not know how to implement, but would consider using if you knew how?_
 %- _If you used your final solution as the new benchmark, do you think an even better solution exists?_
-%
-%-----------
+
+In terms of converging in fewer episodes, I doubt there are many more gains than I can make while not imposing biases using prior knowledge. I would take a trial which has converged to perfect gameplay and save a snapshot of the network parameters, and stop training.
+
+If adding prior knowledge into the model was allowed, I would add a bonus for low theta values to encourage the gradients to reward actions which lead to those states.
+
+If I wanted a more stable algorithm, I would stop mean subtracting the discounted rewards, which always punishes actions taken at the end of an episode, even if they were good actions. This is more important at the end of training, because episodes where the model performs optimally and reaches 200 timesteps would still get actions at the end penalized, and the model becomes ``untrained". 
+
 %
 %**Before submitting, ask yourself. . .**
 %
