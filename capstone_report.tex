@@ -27,7 +27,7 @@
 %- _Has an overview of the project been provided, such as the problem domain, project origin, and related datasets or input data?_
 %- _Has enough background information been given so that an uninformed reader would understand the problem domain and following problem statement?_
 
-Reinforcement learners are a class of algorithms which learn to perform a task by taking actions and recieving feedback from its environment. The algorithm uses the feedback to optimize its behavior to maximize future rewards. These algorithms can amazingly become proficient at a given task-- outperforming humans in some domains-- without ever being given explicit directions, rules, explanations, or any domain knowledge whatsoever. Given enough time to test various strategies, a good reinforcement learning algorithm will converge to the optimal decision policy.
+Reinforcement learners are a class of algorithms which learn to perform a task by sampling legal actions and recieving feedback from its environment. The algorithm uses the feedback to optimize its behavior to maximize future rewards. These algorithms can amazingly become proficient at a given task-- outperforming humans in some domains-- without ever being given explicit directions, rules, explanations, or any domain knowledge whatsoever. Given enough time to test various strategies, a good reinforcement learning algorithm will converge to the optimal decision policy.
 
 In this work, I will use reinforcement learning to solve ``CartPole", a classic control problem with a binary choice at each timestep. This problem was first solved using neural network-like algorithms in 1983.\cite{og_cartpole} Reinforcement learning is capable of learning this task due to its relatively small state and output spaces.\cite{deep_pg}\cite{ddpg_blog}
 
@@ -37,30 +37,29 @@ In this work, I will use reinforcement learning to solve ``CartPole", a classic 
 %- _Have you thoroughly discussed how you will attempt to solve the problem?_
 %- _Is an anticipated solution clearly defined? Will the reader understand what results you are looking for?_
 
-``CartPole" is a simple 2D game which simulates an upright pole connected by a hinge to a cart.\cite{cartpole} The cart moves freely on a frictionless surface. Each trial is initiated with the cart at the center of the environment and the pole upright. At each timestep, the agent has to choose between pushing the cart to left or to the right. The trial ends if the pole tilts 15$\degree$ away from vertical, if the cart has translated to the edge of the screen, or if the trial reaches its time limit. For each timestep in a trial, the game rewards the player +1 point.
+``CartPole" is a simple 2D game which simulates an upright pole connected by a hinge to a cart.\cite{cartpole} The cart moves freely on a frictionless surface. Each trial is initiated with the cart at the center of the environment and the pole upright. At each timestep, the agent has to choose between pushing the cart to left or to the right.  For each timestep in a trial, the game returns a return signal of +1 point. The trial ends if any of these conditions are met:
 
-The goal is to train an algorithm which can maintain the pole upright and within bounds for all 200 timesteps.
+\begin{itemize}
+ \item  the pole tilts 15$\degree$ away from vertical
+ \item the cart has moved out of bounds
+ \item the time limit (200 timesteps) is reached
+ \end{itemize}
+ 
+My goal for this project is to train an algorithm which can maintain the pole upright and within bounds for all 200 timesteps in as few trials as possible.
 
 \subsection*{Metrics}
 %In this section, you will need to clearly define the metrics or calculations you will use to measure performance of a model or result in your project. These calculations and metrics should be justified based on the characteristics of the problem and problem domain. Questions to ask yourself when writing this section:
 %- _Are the metrics you’ve chosen to measure the performance of your models clearly discussed and defined?_
 %- _Have you provided reasonable justification for the metrics chosen based on the problem and solution?_
 
-The most salient metric is episode length, as the game is defined as solved when the algorithm can stay ``alive" until the time limit.
+The most salient metric is episode length, as the game is defined as solved when the algorithm can stay ``alive" for the entire 200 timestep limit.
 
-The second metric will be histograms of the pole's angle $\theta$. We expect these to collapse to a single peak near zero (corresponding to an upright pole) for an optimal policy.
+The second metric will be histograms of the pole's angle $\theta$. We expect these to collapse to a single peak near zero (corresponding to an upright pole) in an optimally behaving policy.
 
-Initially, I created a bonus system to reward states with the pole upright and the cart close to the center of the track, with the rational that these are states which are least likely to lead to failure. However, I disabled those because they amounted to injecting my domain knowledge into the reward system, and I thought it would be more interesting to create an algorithm which learned good states from a completely naive starting point. In addition, some trajectories full of bad decisions, which lasted a very short time, might get a relatively high score because the game ended quickly and the average $x$ and $\theta$ were relatively low, wheras a 
+Initially, I created a bonus system to reward states with the pole upright and the cart close to the center of the track, with the rational that these are states which are least likely to lead to failure. However, I disabled those because they amounted to injecting prior domain knowledge into the reward system. I thought it would be more interesting to create an algorithm which learned good states from a completely naive starting point. In addition, a short-lived trajectory could get relatively high bonus points simply due to the fact that it spent a relatively high fraction of the time in states which reward bonuses.
 
-Finally, one might expect to examine the discounted rewards which the agent actually uses to judge its own performance of a trial. However, as we will see later, these have been mean subtracted and scaled down to unit variance. The effect is that all early timesteps are always punished, and all timesteps near the absorbing state are punished all the time. This turns out to be sufficient for converging, but cannot be used as a metric for comparison in a meaninful way.
-%
-However, if all actions are equally labeled as being worth +1 rewards, the algorithm has no way of descriminating between good actions and bad actions. Internally, this was achieved by using Bellman's eqations, which compounds rewards
-%
-%In order to do that, we have to assign credit to actions that lead to good outcomes in the future. To do this, we give the algorithm discounted rewards instead of simply rewards. Discounted rewards are computed using Bellman's Equation:
-%
-%Discounted rewards are a way of projecting consequences of future states to actions taken in the past. This is done by discounting the future
-%
-%I will use total discounted rewards as well as average discounted reward per timestep as metrics. While these are not in themselves are true objective, they are the external signals that the algorithm actually uses to formulate the gradients used to optimize its decision policy. 
+Finally, one might expect to examine the discounted rewards which the agent uses to improve its own performance. However, as we will see later, these have been mean subtracted and scaled down to unit variance. The effect is that, no matter which actions are taken, late timesteps are always punished, and early timesteps are always rewarded. As we will see, this reward structure is sufficient to encourage a policy to solve the game. However, the reward history and its summary statistics (mean, variance, etc.) has limited use for comparing models after the fact.
+
 
 \section{Analysis}
 %_(approx. 2-4 pages)_
@@ -76,8 +75,7 @@ For this task, my learner will be totally naive and will have no previous data t
 
 Given the state and the chosen action, the agent is given immediate feedback from the game in the form of a reward. These (state, action, reward) pairs are crucial for the reinforcement algorithm to improve its policy from its experiences (discussed in the project design section).
 
-I initially thought of reducing the state space to simply the $x$ position and $\theta$. However, the problem with that is the agent has no way of knowing from a single frame whether the speed at which the pole and cart are moving. If the system is rapidly moving in one direction, it is important for the agent to oppose that movement to cancel it out, or otherwise the episode will end. For instance, if at a given state the pole is slightly tilted, the 2-state agent would naively think it should push it towards the vertical. However, if the pole is already rapidly swinging towards the vertical, accelerating it even more would make in impossible to then stop it from swinging too far the other way. The correct action would have been to anticipate this and oppose to pole. Since the integral of force is mometum, these kinematic values are effectively a kind of memory for the agent. 
-
+I initially thought of reducing the state space to simply the $x$ position and $\theta$. However, the problem with that is the agent has no way of knowing from a single frame whether the speed at which the pole and cart are moving. If the system is rapidly moving in one direction, it is important for the agent to oppose that movement to cancel it out, or otherwise the CartPole will be have too much momentum to prevent it reaching an absorbing state.
 
 
 %\subsection*{Exploratory Visualization}
@@ -125,22 +123,25 @@ To establish a baseline, I created two simple models to compare my policy gradie
 
 I began trying to solve CartPole using an actor-critic model. However, after a few days of work I could not make any progress getting it to learn, no matter which parameters and architectures I tried. In order to make headway on my project, I switched to policy gradients without a critic network, which has less than half the number of parameters and complexity.
 
-Once I switched to the policy gradient algorithm, I tested it with various architectures and hyperparameters. I tested up to four fully conencted layers. I tried between 10 and 200 neurons per layer. I added a dropout layer before the final fully connected layer. I tried various activation functions, tanh, sigmoid, and softmax. A graph of our model is shown on Figure \label{actor_net}. I had also tried using dropout layers and different numbers of hidden layers, but this worked best. Bias.  
+Once I switched to the policy gradient algorithm, I tested it with various architectures and hyperparameters. I tested up to four fully connected layers. I tried between 10 and 200 neurons per layer, using dropout layers, and adding biases to the lairs. I also tested various functions: tanh, sigmoid, and softmax. A graph of my final model is shown in Figure \ref{actor_net}.
 
 
-Instead of having a neural network representing the reward function, it takes rewards directly from the environment instead, passed through Bellman's Equation (Equation \ref{bellman}).
+Instead of having a neural network representing the reward function as in a deep Q network, I used the rewards provided by the environement. However, if all actions are equally labeled as being worth +1 rewards, the algorithm has no way of descriminating between good actions and bad actions. I achieved this using the classic Bellman's Equation (Equation \ref{bellman}):
 
 \begin{equation}\label{bellman}
-D(a_i) = R(a_i) + \gamma \sum_{n=i+1}^{\infty}{R(a_n)} 
+D(a_i) = R(a_i) + \sum_{n=i+1}^{\infty}{ \gamma R(a_n)} 
 \end{equation}
 
-The discounted rewards were further processed by subtracting the mean and dividing by the standard deviation. Subtracting the mean promotes actions with higher-than-expected rewards, and penalizes ones that give lower-than-expected rewards. Dividing by the standard deviation made training more stable, since the rewards had much lower variance.
+The $R(a)$ term represents the reward for a particular action, which was always +1. The second term $\gamma \sum_{n=i+1}^{\infty}{R(a_n)}$ is the sum of all future rewards, where each reward is diminished by $\gamma$, a scaling or discount factor. Discounted rewards are a way of projecting consequences of future states to actions taken in the past.
 
-This works fairly well, but the training is very volatile because the discount reward always rewards early actions and penalizes late actions, regardless of which actions were actually chosen. The idea is that, if a trajectory lasts a long time, the early actions will have accumulated quite a large discounted reward. To further reduce variance, I tried two different batching techniques. One is to save all the (state,action,reward) pairs into a replay buffer, and after a certain amount of trials solve the discounted reward across all the different trajectories in the mini batch. The advantage of this is that when we subtract the mean and standard deviation it will be of our entire batch. Thus, each indiviual action are scored against a larger pool of actions and the model can better discriminate between good and bad actions.
+The discounted rewards were further processed by subtracting the mean and dividing by the standard deviation. Subtracting the mean promotes actions with higher-than-expected rewards, and penalizes ones that give below-average rewards. Dividing by the standard deviation made training more stable, since the rewards had much lower variance.
 
-Similarly, I tried using batched gradients. During each episode in the batch, we compute the gradient of the loss with respect to our parameters and add it to the running gradient sum vector. We continue to add each computed gradient into the batch gradient. The idea is that, since the rewards are very volatile, any given gradient for any particular parameter might sometimes be positive or negative, but that variance is smoothed out over multiple trials.
+This works fairly well, but the training is very volatile because the discount reward always rewards early actions and penalizes late actions, regardless of which actions were actually chosen. The rational is that trajectories which last longer are associated with discount reward vectors which strongly encourage the early actions, which will have accumulated a large discounted reward. As we will see in the conclusion, this has a deleterious effect at the later stages of training.
 
-Initially, I created a bonus system to reward states with the pole upright and the cart close to the center of the track, with the rational that these are states which are least likely to lead to failure. However, I disabled those because they amounted to injecting my domain knowledge into the reward system, and I thought it would be more interesting to create an algorithm which learned good states from a completely naive starting point.
+To further reduce variance, I tried two different batching techniques. One is to save all the (state,action,reward) pairs into a replay buffer, and after a certain amount of trials solve the discounted reward across all the different trajectories in the mini batch. The advantage of this is that when we subtract the mean and standard deviation it will be of our entire batch. Thus, each indiviual action are scored against a larger pool of actions and the model can better discriminate between good and bad actions.
+
+Similarly, I tried using batched gradients. During each episode in the batch, we compute the gradient of the loss with respect to our parameters and add it to the running gradient sum vector. We continue to add each computed gradient into the batch gradient. This smooths out the volatility in the gradients because while sometimes the gradients are positive, and sometimes negative, they will all sum together and approximate the central tendency of the batch.
+
 
 
 \begin{figure}[htbp]
@@ -160,17 +161,16 @@ Initially, I created a bonus system to reward states with the pole upright and t
 %- _Is the process of improvement clearly documented, such as what techniques were used?_
 %- _Are intermediate and final solutions clearly reported as the process is improved?_
 
-I had a very hard time getting to the point where any of my models would train. At first, my intuition was to add more nodes and layers to my model and let it train for more iterations in the hopes that a larger network would be able to find a solution to the problem. At one point, I let the actor-critic model train overnight on my GPU with over 200,000 episodes, but it never converged to a solution.
+I had a very hard time getting to the point where any of my models would train. At first, my intuition was to take the brute force approach and add more nodes and layers to my model and let it train for more iterations. The rational was that a more complicated model has more degrees of freedom and could thus represent a more complex function which could solve my problem. At one point, I let the actor-critic model train overnight on my GPU with over 200,000 episodes, but it never converged to a solution.
 
-After that, I got rid of the critic and worked on the actor. I tried more layers, fewer layers, adding biases, removing biases, different activation functions, different weight initalizations, different optimizers, dropout layers, different learning rates, and nothing seemed to work.
+After that, I reduced the complexity of my algorithm by removing the critic network. I tried various architectures: more layers, fewer layers, adding biases, different activation functions, different loss and optimization functions, using dropout layers, different learning rates. Nothing seemed to work.
 
-Finally, I found a policy gradient implementation which solved CartPole on Github. I took it and progressively changed my hyperparameters and network architecture to match theirs. It still did not train. Finally, I found the two lines of code which broke training. One was my weights initialization, which was using truncated normals. As soon as I changed it to an xavier intialization, my model started to train successfully. I was able to reproduce the problem reliably simply by switching the weights initialization back and forth between xavier and truncated normals.
+Finally, I found a policy gradient implementation which solved CartPole on Github. I took it and progressively changed my hyperparameters and network architecture to match the functioning example. It still did not train. The last two differences in my model architecture were the ones which were impeding training. One was my weights initialization, which was using truncated normals. As soon as I changed it to an xavier intialization, my model started to train successfully. The other was the use of biases in one of the hidden layers. I was able to reliably reproduce the problem simply by switching the weights initialization back and forth between xavier and truncated normals, or by adding biases to the particular fully connected layer.
 
-With my model finally training, I started optimizing the parameters and architecture. I decided to try to find the model which solved the game in as few episodes as possible. The original implementation took 2000 episodes to converge. I created a series of nested for loops to do a large parameter sweep of possible models to rule out certain architectures. 
+With my model finally training, I started optimizing the parameters and architecture. The original implementation used only 10 neurons per layer and it took 2000 episodes to solve CartPole. I created a series of nested for loops to do a large parameter sweep of possible models to rule out certain architectures by examining their properties in Tensorboard. In this way, I tested over 100 model architectures.
 
 Predictably, I found that the following things slowed down training time: using dropout layers, gradient batches, extra layers, and lower learning rates. As I iteratively reduced the scope of my parameter space scope, my models trained faster and faster, and I could reduce the number of episodes per model. Finally, I found a model which could reliably get a perfect score in less than 30 episodes, and sometimes as low as 13 episodes (discussed in the Model Evaluation section).
 
-Tensorboard was invaluable. It allowed easy comparison across multiple models. By the end, I compared dozens of models before selecting the best one. 
 
 
 \section{Results}
@@ -205,7 +205,7 @@ The random policy had a high variance in performance, with episodes lasting betw
 
 \subsubsection*{Contrarian Policy}
 
-The average episode length is approximately 45 timesteps, which is as more than twice as good as taking random actions (Figure \ref{pg_episodes}). As expected, the agent does not improve over time.  Qualitatively, the tails of the theta distributions (Figure \ref{contrarian_thetas}) are slightly smaller than the random agent. The distributions do not change over time, which is expected since this policy does not learn. 
+The average episode length is approximately 45 timesteps, which is more than twice as good as taking random actions (Figure \ref{pg_episodes}). As expected, the agent does not improve over time.  Qualitatively, the tails of the theta distributions (Figure \ref{contrarian_thetas}) are significantly smaller than the random agent, indicating that the pole spends more time balanced near the center. The distributions do not change over time, which is expected since this policy does not learn. 
 
 \begin{figure}[htbp]
 \begin{center}
@@ -225,9 +225,11 @@ The average episode length is approximately 45 timesteps, which is as more than 
 
 \subsubsection*{Policy Gradient}
 
-The actor usually plays a perfect game of 200 timesteps within 35 episodes (Figure \ref{pg_episodes}), which is substantially better than the random actor's lifespan of 20 timesteps. Sometimes, it plays a perfect game in as little as 13 episodes. On the other hand, sometimes it takes over 100 episodes to do so using the same exact model parameters (see the dark blue trace).
+The final optimized model usually plays a perfect game within 35 episodes (Figure \ref{pg_episodes}), which is substantially better than the random actor's performance. Sometimes, it plays a perfect game in as little as 13 episodes. On the other hand, 
 
-However, while these find the game quickly, the combination of a high learning rate and a noisy reward signal results in inconsitent results.
+However, while these find the game quickly, the combination of a high learning rate and a noisy reward signal results in very high variance and inconsitent results. Sometimes it takes over 100 episodes to play a perfect game using the same exact model parameters (see the dark blue trace). Occaisionally, the model even catastrophically collapses (discussed in conclusion).
+
+Letting the optimizer continue after we have solved the game inevitably causes the agent to stop playing optimally. This is because the reward function penalizes things near the end, even if doing well. This is advantageous for fast training, but bad once have solved the game.
 
 \begin{figure}[htbp]
 \begin{center}
@@ -261,10 +263,10 @@ However, while these find the game quickly, the combination of a high learning r
 %- _Is the visualization thoroughly analyzed and discussed?_
 %- _If a plot is provided, are the axes, title, and datum clearly defined?_
 %
-If I let it run long enough, it lowers in score. That's because the reward function penalizes things near the end, even if doing well. This is good for fast training, but bad once we have converged.
 
 
-I selected a trial where the model failed to train. I looked at the istribution of activations and weights over time, and it was clear that something was wrong (Figure \ref{pg_stuck}). The outputs tended to be zeros or ones, indicating that the units in the network had catastrophically converged to zeros, becoming impossible to change with multiplication. These ``dead models" happened roughly 15\% of the time, which is to be expected with our aggressive learning rate and lack of batching.
+
+I selected a trial where the model failed to train. I looked at the distribution of activations and weights over time, and it was clear that something was wrong (Figure \ref{pg_stuck}). The outputs tended to be zeros or ones, indicating that the model always picked a single direction to push the cart in. I examined the weights for the units in the actor network, and saw that early in the training the weights catastrophically converged to zeros, becoming impossible to update through matrix multiplication. These ``dead models" happened roughly 10\% of the time, which is to be expected with our aggressive learning rate and lack of batching.
  
 
 \begin{figure}[htbp]
@@ -281,9 +283,9 @@ I selected a trial where the model failed to train. I looked at the istribution 
 %- _Were there any interesting aspects of the project?_
 %- _Were there any difficult aspects of the project?_
 %- _Does the final model and solution fit your expectations for the problem, and should it be used in a general setting to solve these types of problems?_
-If I had to give myself advice, it would be to start with a simple network architecture and build on it. I started with an actor-critic model, which was too ambitious and much harder to diagnose with all the moving parts. 
+If I had to give myself advice, it would be to start with a simple network architecture and expand the model from there. I started with an actor-critic model, which was too ambitious and much harder to debug when there were multiple bugs compounding each other.
 
-I wish I would have started using Tensorboard summaries sooner. They proved invaluable in troubleshooting, once I figured out how the summary operations worked.
+I wish I would have started using Tensorboard summaries sooner. They proved invaluable in troubleshooting, once I figured out how to produce the summaries correctly.
 
 \subsection*{Improvement}
 %In this section, you will need to provide discussion as to how one aspect of the implementation you designed could be improved. As an example, consider ways your implementation can be made more general, and what would need to be modified. You do not need to make this improvement, but the potential solutions resulting from these changes are considered and compared/contrasted to your current solution. Questions to ask yourself when writing this section:
@@ -291,11 +293,9 @@ I wish I would have started using Tensorboard summaries sooner. They proved inva
 %- _Were there algorithms or techniques you researched that you did not know how to implement, but would consider using if you knew how?_
 %- _If you used your final solution as the new benchmark, do you think an even better solution exists?_
 
-In terms of converging in fewer episodes, I doubt there are many more gains than I can make while not imposing biases using prior knowledge. I would take a trial which has converged to perfect gameplay and save a snapshot of the network parameters, and stop training.
+In terms of converging in fewer episodes, I doubt there are many more gains than I can make while not imposing biases using prior knowledge. If adding prior knowledge into the model was allowed, I would add a bonus for low theta values to encourage the gradients to reward actions which lead to those states.
 
-If adding prior knowledge into the model was allowed, I would add a bonus for low theta values to encourage the gradients to reward actions which lead to those states.
-
-If I wanted a more stable algorithm, I would stop mean subtracting the discounted rewards, which always punishes actions taken at the end of an episode, even if they were good actions. This is more important at the end of training, because episodes where the model performs optimally and reaches 200 timesteps would still get actions at the end penalized, and the model becomes ``untrained". 
+To prevent the problem with the network untraining themselves, I would stop updating the network parameters once the game is reliably beating the game. If I wanted a more stable algorithm, I would stop mean subtracting the discounted rewards, which always punishes actions taken at the end of an episode, even if they were good actions. Finally, I would reduce the learning rate and start using batches again. These all cause the model to slow down, but guarantees a more reliable algorithm overall.
 
 %
 %**Before submitting, ask yourself. . .**
