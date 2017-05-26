@@ -11,7 +11,7 @@ os.environ["CUDA_VISIBLE_DEVICES"] = "1"  # use correct GPU
 
 ENV_NAME = 'CartPole-v0'
 VIDEO_DIR = './results/videos/'
-TENSORBOARD_RESULTS_DIR_PREFIX = './results/tensorboard/with_grad_buffer4/'
+TENSORBOARD_RESULTS_DIR_PREFIX = './results/tensorboard/with_gradient_buffers5/'
 
 STATE_DIM = 4
 ACTION_DIM = 1
@@ -45,7 +45,7 @@ def make_hparam_string(learning_rate, n_neurons, batch_size):
 
 
 class Policy(object):
-    def __init__(self, sess):
+    def __init__(self, sess, *args):
         self.sess = sess
 
         self.state_dim = STATE_DIM
@@ -58,12 +58,22 @@ class Policy(object):
         choice = int(np.random.choice(ACTION_SPACE, 1, p=prob_per_action))
         return choice
 
+    def get_trainable_params(self):
+        return [None]
+
+    def calc_gradient(self, *args):
+        return np.zeros(1), None
+
+    def run_optimization_step(self, _):
+        pass
+
 
 class RandomPolicy(Policy):
     """A policy to benchmark the policy gradient against. takes a random action at every timestep."""
 
     def __init__(self, *args, sess=None):
-        super().__init__(sess)
+        super().__init__(sess, *args)
+        self.__name__ = 'random'
 
     def calc_action_probabilities(self, _):
         choice = np.random.choice(2)  # spits out 0 or 1
@@ -105,6 +115,21 @@ class PolicyGradient(Policy):
         action_probabilities, summaries = self.sess.run([self.actor.action_probability_op, self.actor.summary_op1],
                                                         feed_dict={self.actor.input_states: current_state})
         return action_probabilities, summaries
+
+    def get_trainable_params(self):
+        tparams = self.sess.run(self.actor.trainable_net_params)
+        return tparams
+
+    def calc_gradient(self, ep_states, ep_fake_labels, ep_discounted_rewards):
+        gradients, summary = self.sess.run([self.actor.gradient_wrt_params, self.actor.summary_op2],
+                                           feed_dict={self.actor.input_states: ep_states,
+                                                      self.actor.ep_fake_action_labels: ep_fake_labels,
+                                                      self.actor.reward_signal: ep_discounted_rewards})
+        return gradients, summary
+
+    def run_optimization_step(self, gradient_buffer):
+        self.sess.run(self.actor.optimize_step, feed_dict={self.actor.W1_gradients: gradient_buffer[0],
+                                                     self.actor.W2_gradients: gradient_buffer[1]})
 
         # def predict_rewards(self, observed_states, observed_actions):
         #     """in case we want to peek at our reward predictions"""
@@ -188,18 +213,6 @@ class ActorNetwork(object):
 
             return reward_signal, ep_fake_action_labels, loss, gradient_wrt_params, optimizer, W1_gradients, \
                 W2_gradients, optimize_step, summary_op
-
-    def calc_gradient(self, ep_states, ep_fake_labels, ep_discounted_rewards):
-        gradients, summary = self.sess.run([self.gradient_wrt_params, self.summary_op2],
-                                           feed_dict={self.input_states: ep_states,
-                                                      self.ep_fake_action_labels: ep_fake_labels,
-                                                      self.reward_signal: ep_discounted_rewards})
-
-        return gradients, summary
-
-    def run_optimization_step(self, gradient_buffer):
-        self.sess.run(self.optimize_step, feed_dict={self.W1_gradients: gradient_buffer[0],
-                                                     self.W2_gradients: gradient_buffer[1]})
 
 
 # class CriticNetwork(object):
@@ -302,7 +315,7 @@ def run_episodes(policy, sess, batch_size, hparam):
     batch_reward_sum = 0
 
     # make a gradient array w same shape as params, fill with zeros
-    gradient_buffer = sess.run(policy.actor.trainable_net_params)
+    gradient_buffer = policy.get_trainable_params()
     for ix, grad in enumerate(gradient_buffer):
         gradient_buffer[ix] = np.zeros_like(grad)
 
@@ -368,7 +381,7 @@ def run_episodes(policy, sess, batch_size, hparam):
 
         ep_discounted_rewards = calc_discounted_rewards(ep_rewards)
 
-        gradients, summary = policy.actor.calc_gradient(ep_states, ep_fake_labels, ep_discounted_rewards)
+        gradients, summary = policy.calc_gradient(ep_states, ep_fake_labels, ep_discounted_rewards)
         summaries.append(summary)
 
         thetas = ep_states[:, 2]
@@ -381,7 +394,10 @@ def run_episodes(policy, sess, batch_size, hparam):
         })
         summaries.append(summary_str)
         for s in summaries:
-            writer.add_summary(s, episode_i)
+            try:
+                writer.add_summary(s, episode_i)
+            except TypeError:  # Random and Contrarian policies don't actually make tf summaries
+                pass
         writer.flush()
 
         for ix, grad in enumerate(gradients):
@@ -389,7 +405,7 @@ def run_episodes(policy, sess, batch_size, hparam):
 
         # If we have completed enough episodes, then update the policy network with our gradients.
         if episode_i % batch_size == 0:
-            policy.actor.run_optimization_step(gradient_buffer)
+            policy.run_optimization_step(gradient_buffer)
             # after updating, reset gradient buffer for next batch
             for ix, grad in enumerate(gradient_buffer):
                 gradient_buffer[ix] = np.zeros_like(grad)
@@ -440,30 +456,14 @@ def build_summaries():
     return summary_ops, summary_vars
 
 
-# def plot_metadata(total_times, total_rewards, reward_mses):
-#     f, axarr = plt.subplots(3, sharex=True) #sharex [True] must be one of ['all', 'row', 'col', 'none']
-#     x = np.arange(N_EPISODES)
-#     axarr[0].plot(x, total_times)
-#     axarr[0].set_title('Total Times')
-#     axarr[0].set_ylabel("Time")
-#     axarr[1].plot(x, total_rewards)
-#     axarr[1].set_title('Total Rewards')
-#     axarr[1].set_ylabel("Rewards")
-#     axarr[2].plot(x, reward_mses)
-#     axarr[2].set_ylabel("Critic Weward MSE")
-#     axarr[2].set_xlabel("Episode Number")
-#
-#     plt.show()
-
-
 def main(_):
     """parameter sweep to find the best model"""
-    for i in range(5):  # repeat everything a few times to get statistical to get a sense of how stable models are
+    for i in range(10):  # repeat everything a few times to get statistical to get a sense of how stable models are
         global TENSORBOARD_RESULTS_DIR
         TENSORBOARD_RESULTS_DIR = TENSORBOARD_RESULTS_DIR_PREFIX + "{}/".format(i)  # put each iteration in a different folder for tensorboard
         for learning_rate in [1e-1]:#np.linspace(1e-1, 1e-2, 4):
             for use_two_fc in [False]:
-                for n_neurons in np.linspace(100,130, 4, dtype=np.int):
+                for n_neurons in [120]:#np.linspace(100,130, 4, dtype=np.int):
                     for use_dropout in [False]:  # dropout always made things worse
                         for batch_size in [1]:
                             # Construct a hyperparameter string for each one (example: "lr_1E-3,fc=2,conv=2)
@@ -474,14 +474,8 @@ def main(_):
                                 policies = {'random': RandomPolicy, 'contrarian': ContrarianPolicy,
                                             'policy_gradient': PolicyGradient}
                                 policy = policies['policy_gradient'](learning_rate, n_neurons, sess=sess)
-
                                 run_episodes(policy, sess, batch_size, hparam)
-                                # total_times, total_rewards, reward_mses = train(sess, env, policy)
-                                # plot_metadata(total_times, total_rewards, reward_mses)
 
-                                # TODO save progress to resume learning weights
-
-                                # gym.upload('/tmp/cartpole-experiment-1', api_key='ZZZ')
 
 
 if __name__ == '__main__':
